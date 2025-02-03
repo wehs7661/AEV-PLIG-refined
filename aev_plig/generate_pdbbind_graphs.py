@@ -376,9 +376,9 @@ failed_after_reading = []
 
 for i, pdb in tqdm(enumerate(data["PDB_code"])):
     if data["refined"][i]:
-        folder = "data/pdbbind/refined-set/"
+        folder = "/biggin/b231/bioc1870/Documents/Data/PDBbind/refined-set/"
     else:
-        folder = "data/pdbbind/general-set/"
+        folder = "/biggin/b231/bioc1870/Documents/Data/PDBbind/v2020-other-PL/"
     
     mol_path = os.path.join(folder, pdb, f'{pdb}_ligand.mol2')
     mol = Chem.MolFromMol2File(mol_path)
