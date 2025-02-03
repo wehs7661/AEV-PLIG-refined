@@ -350,14 +350,14 @@ def mol_to_graph(mol, mol_df, aevs, extra_features=["atom_symbol",
 '''
 Load data
 '''
-data = pd.read_csv("data/pdbbind_processed.csv", index_col=0)
+data = pd.read_csv("../../data/pdbbind_processed.csv", index_col=0)
 
 '''
 Generate for all complexes: ANI-2x with 22 atom types. Only 2-atom interactions
 '''
 print("The number of data points is ", len(data))
 
-atom_keys = pd.read_csv("data/PDB_Atom_Keys.csv", sep=",")
+atom_keys = pd.read_csv("../data/PDB_Atom_Keys.csv", sep=",")
 atom_map = pd.DataFrame(pd.unique(atom_keys["ATOM_TYPE"]))
 atom_map[1] = list(np.arange(len(atom_map)) + 1)
 atom_map = atom_map.rename(columns={0:"ATOM_TYPE", 1:"ATOM_NR"})
@@ -407,7 +407,7 @@ print(len(failed_list), len(failed_after_reading))
 
 
 #save the graphs to use as input for the GNN models
-output_file_graphs = "data/pdbbind.pickle"
+output_file_graphs = "test.pickle"
 with open(output_file_graphs, 'wb') as handle:
     pickle.dump(mol_graphs, handle, protocol=pickle.HIGHEST_PROTOCOL)
 

@@ -33,10 +33,12 @@ dependencies = [
     "qcelemental",
     "scikit-learn",
     "tqdm",
+    "natsort",
 ]
 
 # Entry point for CLI commands
 [project.scripts]
+process_dataset = "aev_plig.cli.process_dataset:main"
 generate_graphs = "aev_plig.cli.generate_graphs:main"
 
 # Update the urls once the hosting is set up.
