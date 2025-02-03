@@ -1,0 +1,4 @@
+*.pyc
+__pycache__/
+aev_plig.egg-info/
+data/pdbbind.pickle

@@ -9,6 +9,7 @@ print("loading graph from pickle file for pdbbind2020")
 with open("data/pdbbind.pickle", 'rb') as handle:
     pdbbind_graphs = pickle.load(handle)
 
+
 print("loading graph from pickle file for BindingNet")
 with open("data/bindingnet.pickle", 'rb') as handle:
     bindingnet_graphs = pickle.load(handle)
