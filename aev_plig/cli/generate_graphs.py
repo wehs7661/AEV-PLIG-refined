@@ -12,6 +12,7 @@ import qcelemental as qcel
 from tqdm import tqdm
 from rdkit import Chem
 from aev_plig.data import data_dir
+from aev_plig.utils import Logger
 
 
 def initialize(args):
@@ -23,7 +24,14 @@ def initialize(args):
         "--csv",
         type=str,
         required=True,
-        help="Path to the processed CSV file."
+        help="The path to the input processed CSV file."
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default="graphs.pickle",
+        help="The path to the output pickle file for the generated graphs."
     )
 
     args = parser.parse_args(args)
@@ -367,28 +375,15 @@ def mol_to_graph(mol, mol_df, aevs, extra_features=["atom_symbol",
     
     return len(mol_df), features, edge_index, edge_attr
 
-"""
-def predict(model, device, loader, y_scaler=None):
-    model.eval()
-    total_preds = torch.Tensor()
-    total_labels = torch.Tensor()
-    print('Make prediction for {} samples...'.format(len(loader.dataset)))
-    with torch.no_grad():
-        for data in loader:
-            data = data.to(device)
-            output = model(data)
-            total_preds = torch.cat((total_preds, output.cpu()), 0)
-            total_labels = torch.cat((total_labels, data.y.view(-1, 1).cpu()), 0)
-
-    return y_scaler.inverse_transform(total_labels.numpy().flatten().reshape(-1,1)).flatten(), y_scaler.inverse_transform(total_preds.detach().numpy().flatten().reshape(-1,1)).flatten()
-"""
 
 def main():
     t0 = time.time()
     args = initialize(sys.argv[1:])
+    sys.stdout = Logger("generate_graphs.log")
+    sys.stderr = Logger("generate_graphs.log")
 
     # Step 1. Load data
-    data = pd.read_csv(args.csv, index_col=0)
+    data = pd.read_csv(args.csv)
     print("The number of data points is ", len(data))
 
     # Step 2. Generate for all complexes: ANI-2x with 22 atom types. Only 2-atom interactions
@@ -405,42 +400,44 @@ def main():
     radial_coefs = [RcR, EtaR, RsR]
 
     mol_graphs = {}
-
     failed_list = []
     failed_after_reading = []
 
-    for i, pdb in tqdm(enumerate(data["PDB_code"])):
-        if data["refined"][i]:
-            folder = "/biggin/b231/bioc1870/Documents/Data/PDBbind/refined-set/"
+    for index, row in tqdm(data.iterrows(), file=sys.__stderr__):
+        system_id = row["system_id"]
+        protein_path = row["protein_path"]
+        ligand_path = row["ligand_path"]
+        ligand_ftype = ligand_path.split(".")[-1]
+        if ligand_ftype == "mol2":
+            mol = Chem.MolFromMol2File(ligand_path)
+        elif ligand_ftype == "sdf":
+            mol = Chem.SDMolSupplier(ligand_path, removeHs=False)[0]
         else:
-            folder = "/biggin/b231/bioc1870/Documents/Data/PDBbind/v2020-other-PL/"
-        
-        mol_path = os.path.join(folder, pdb, f'{pdb}_ligand.mol2')
-        mol = Chem.MolFromMol2File(mol_path)
-        
+            print("Unknown file format:", ligand_path)
+            continue
+
         if mol is None:
-            print("can't read molecule structure:", pdb)
-            failed_list.append(pdb)
+            print("can't read molecule structure:", system_id)
+            failed_list.append(system_id)
             continue
         else:
-            mol = Chem.AddHs(mol, addCoords=True)
-
+            if ligand_ftype == "mol2":
+                mol = Chem.AddHs(mol, addCoords=True)
+        
         try:
-            protein_path = os.path.join(folder, pdb, f'{pdb}_protein.pdb')
-            
             mol_df, aevs = GetMolAEVs_extended(protein_path, mol, atom_keys, radial_coefs, atom_map)
             graph = mol_to_graph(mol, mol_df, aevs)
-            mol_graphs[pdb] = graph
-            
-
+            mol_graphs[system_id] = graph
         except ValueError as e:
             print(e)
-            failed_after_reading.append(pdb)
+            failed_after_reading.append(system_id)
             continue
 
-    print(len(failed_list), len(failed_after_reading))
+    print("Number of failed molecules:", len(failed_list))
+    print("Number of failed after reading:", len(failed_after_reading))
 
-    #save the graphs to use as input for the GNN models
-    output_file_graphs = "data/pdbbind.pickle"
-    with open(output_file_graphs, 'wb') as handle:
+    # Save the graphs to use as input for the GNN models
+    with open(args.output, 'wb') as handle:
         pickle.dump(mol_graphs, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    
+    print(f"Elapsed time: {time.time() - t0:.2f} seconds")
