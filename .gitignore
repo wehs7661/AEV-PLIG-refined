@@ -2,3 +2,5 @@
 __pycache__/
 aev_plig.egg-info/
 data/pdbbind.pickle
+*/_version.py
+.ipynb_checkpoints

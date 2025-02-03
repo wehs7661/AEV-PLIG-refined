@@ -36,7 +36,8 @@ dependencies = [
 ]
 
 # Entry point for CLI commands
-# [project.scripts]
+[project.scripts]
+generate_graphs = "aev_plig.generate_graphs:main"
 
 # Update the urls once the hosting is set up.
 #[project.urls]
