@@ -1,13 +1,33 @@
-import pandas as pd
-import pickle
+import os
+import sys
+import time
 import torch
+import pickle
+import argparse
 import torchani
 import torchani_mod
-import qcelemental as qcel
 import numpy as np
+import pandas as pd
+import qcelemental as qcel
 from tqdm import tqdm
-import os
 from rdkit import Chem
+from aev_plig.data import data_dir
+
+
+def initialize(args):
+    parser = argparse.ArgumentParser(
+        description='Generate graphs for the training set.'
+    )
+    parser.add_argument(
+        "-c",
+        "--csv",
+        type=str,
+        required=True,
+        help="Path to the processed CSV file."
+    )
+
+    args = parser.parse_args(args)
+    return args
 
 
 def elements_to_atomicnums(elements):
@@ -364,22 +384,20 @@ def predict(model, device, loader, y_scaler=None):
 """
 
 def main():
-    '''
-    Load data
-    '''
-    data = pd.read_csv("data/pdbbind_processed.csv", index_col=0)
+    t0 = time.time()
+    args = initialize(sys.argv[1:])
 
-    '''
-    Generate for all complexes: ANI-2x with 22 atom types. Only 2-atom interactions
-    '''
+    # Step 1. Load data
+    data = pd.read_csv(args.csv, index_col=0)
     print("The number of data points is ", len(data))
 
-    atom_keys = pd.read_csv("data/PDB_Atom_Keys.csv", sep=",")
+    # Step 2. Generate for all complexes: ANI-2x with 22 atom types. Only 2-atom interactions
+    atom_keys = pd.read_csv(os.path.join(data_dir, "PDB_Atom_Keys.csv"), sep=",")
     atom_map = pd.DataFrame(pd.unique(atom_keys["ATOM_TYPE"]))
     atom_map[1] = list(np.arange(len(atom_map)) + 1)
     atom_map = atom_map.rename(columns={0:"ATOM_TYPE", 1:"ATOM_NR"})
 
-    # Radial coefficients: ANI-2x
+    # Step 3. Radial coefficients: ANI-2x
     RcR = 5.1 # Radial cutoff
     EtaR = torch.tensor([19.7]) # Radial decay
     RsR = torch.tensor([0.80, 1.07, 1.34, 1.61, 1.88, 2.14, 2.41, 2.68, 
@@ -422,9 +440,7 @@ def main():
 
     print(len(failed_list), len(failed_after_reading))
 
-
     #save the graphs to use as input for the GNN models
     output_file_graphs = "data/pdbbind.pickle"
     with open(output_file_graphs, 'wb') as handle:
         pickle.dump(mol_graphs, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
