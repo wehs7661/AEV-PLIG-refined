@@ -22,10 +22,10 @@ requires-python = ">=3.8"
 
 # Declare any run-time dependencies that should be installed with the package.
 dependencies = [
-    "torch",
-    "torchvision",
-    "torchaudio",
-    "torch-scatter",
+    "torch==2.5.0",
+    "torchvision==0.20.0",
+    "torchaudio==2.5.0",
+    "torch-scatter==2.1.2+pt25cu124",
     "torch_geometric",
     "torchani",
     "rdkit",

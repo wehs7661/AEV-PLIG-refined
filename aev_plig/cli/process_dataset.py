@@ -4,7 +4,10 @@ import time
 import glob
 import natsort
 import argparse
+import datetime
 import pandas as pd
+import aev_plig
+from aev_plig.utils import Logger
 
 def initialize(args):
     parser = argparse.ArgumentParser(
@@ -37,6 +40,13 @@ def initialize(args):
         "--output",
         type=str,
         help="The output CSV file. The default is processed_[dataset].csv where [dataset] is the dataset name."
+    )
+    parser.add_argument(
+        "-l",
+        "--log",
+        type=str,
+        default="process_dataset.log",
+        help="The path to the log file. Default is process_dataset.log."
     )
 
     args = parser.parse_args(args)
@@ -80,8 +90,16 @@ def collect_entries(base_dir, dataset=None, ref_dataset=None):
 def main():
     t0 = time.time()
     args = initialize(sys.argv[1:])
-    if args.output is None:
-        args.output = f"processed_{args.dataset}.csv"
+    sys.stdout = Logger(args.log)
+    sys.stderr = Logger(args.log)
+
+    print(f"Version of aev_plig: {aev_plig.__version__}")
+    print(f"Command line: {' '.join(sys.argv)}")
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Current time: {datetime.datetime.now()}\n")
+
+    print(f"Processing {args.dataset} ...")
+    args.output = f"processed_{args.dataset}.csv" if args.output is None else args.output
     data = collect_entries(args.dir, args.dataset, args.ref)
     df = pd.DataFrame(data)
     df.to_csv(args.output, index=False)

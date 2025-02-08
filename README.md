@@ -2,61 +2,44 @@
 
 AEV-PLIG is a GNN-based scoring function that predicts the binding affinity of a bound protein-ligand complex given its 3D structure.
 
-- [Installation guide](#installation-guide)
-- [Demo](#demo)
-
-## Installation guide
-AEV-PLIG has been tested on the following systems:
-+ macOS: Monterey (12.5.1)
-
-### Create conda environment
-Installation times may vary, but took around 30 seconds on Mac M1.
-For *macOS*:
+## Installation
+We recommend using a conda environment to install the package.
 ```
-conda env create --file aev-plig-mac.yml
-```
-For *Linux*:
-```
-conda env create --file aev-plig-linux.yml
-```
-Install packages manually:
-```
-conda create --name aev-plig python=3.8
-conda activate aev-plig
-pip install torch torchvision torchaudio
-pip install torch-scatter
-pip install torch_geometric
-pip install rdkit
-pip install torchani
-pip install qcelemental
-pip install pandas
+conda create --name aev-plig
+git clone https://github.com/wehs7661/AEV-PLIG.git
+cd AEV-PLIG
+pip install .
 ```
 
 ## Demo
 This section demonstrates how to train your own AEV-PLIG model, and how to use AEV-PLIG to make predictions.
 
-The computational requirements for each script are included, and unless otherwise specified, the hardware used is a Mac M1 CPU.
-
 ### Training
 
 #### Download training data
-Download the training datasets PDBbind and BindingNet
+Download the training datasets PDBbind and BindingNet using the following commands:
 ```
 wget http://pdbbind.org.cn/download/PDBbind_v2020_other_PL.tar.gz
 wget http://pdbbind.org.cn/download/PDBbind_v2020_refined.tar.gz
 wget http://bindingnet.huanglab.org.cn/api/api/download/binding_database
 ```
-Put PDBbind data into *data/pdbbind/refined-set* and *data/pdbbind/general-set*
 
-Put BindingNet data into *data/bindingnet/from_chembl_client*
+#### Preprocess training data
+Before generating graphs for a dataset, we need to preprocess the dataset. Taking PDBbind as an example, we run the following command:
+```
+process_dataset -ds pdbbind -d {path_to_pdbbind_dataset} -o {output_directory} 
+```
+This will generate a CSV file containing necessary columns for graph generation by the CLI `generate_graphs` (see below), including `system_id`, `protein_path`, and `ligand_path`. This should take just a few seconds.
 
 #### Generate PDBbind and BindingNet graphs
-The following scripts will generate graphs into *pdbbind.pickle* and *bindingnet.pickle*. Takes around 30 minute in total to run.
+To generate graphs for a dataset, e.g., PDBbind, run the following command:
 ```
-python generate_pdbbind_graphs.py
-python generate_bindingnet_graphs.py
+generate_graphs -c processed_pdbbind.csv -o graphs_pdbbind.pickle
 ```
+The command takes around 30 minutes in total to complete. The generated graphs are saved in a pickle file.
 
+
+---
 #### Generate data for pytorch
 Running this script takes around 2 minutes.
 ```
