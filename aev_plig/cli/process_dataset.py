@@ -54,8 +54,8 @@ def initialize(args):
 
 
 def collect_entries(base_dir, dataset=None, ref_dataset=None):
+    data = []
     if dataset == "pdbbind":
-        data = []
         for subset_dir in ["refined-set", "v2020-other-PL"]:
             dirs = natsort.natsorted(glob.glob(os.path.join(base_dir, f'{subset_dir}/*')))
             for d in dirs:
@@ -70,7 +70,25 @@ def collect_entries(base_dir, dataset=None, ref_dataset=None):
                     })
 
     elif dataset == "bindingnet":
-        pass
+        dirs = natsort.natsorted(glob.glob(os.path.join(base_dir, "from_chembl_client/*")))
+        for d in dirs:
+            base_name = os.path.basename(d)  # pdb id
+            if base_name not in ["index", "PDBbind_minimized"]:
+                target_dirs = natsort.natsorted(glob.glob(os.path.join(d, "target_CHEMBL*")))
+                for target_dir in target_dirs:
+                    ligand_dirs = natsort.natsorted(glob.glob(os.path.join(target_dir, "CHEMBL*")))
+                    for ligand_dir in ligand_dirs:
+                        target_chembl = os.path.basename(target_dir).split('_')[-1]
+                        ligand_chembl = os.path.basename(ligand_dir)
+                        system_id = f"{target_chembl}_{base_name}_{ligand_chembl}"
+                        protein_path = os.path.abspath(os.path.join(d, 'rec_h_opt.pdb'))
+                        ligand_path = os.path.abspath(os.path.join(ligand_dir, f'{base_name}_{target_chembl}_{ligand_chembl}.sdf'))
+                        data.append({
+                            "system_id": system_id,
+                            "protein_path": protein_path,
+                            "ligand_path": ligand_path
+                        })
+
     elif dataset == "bindingdb":
         pass
     elif dataset == "neuralbind":

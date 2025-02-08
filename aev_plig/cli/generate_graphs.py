@@ -5,6 +5,8 @@ import torch
 import pickle
 import argparse
 import torchani
+import datetime
+import aev_plig
 import torchani_mod
 import numpy as np
 import pandas as pd
@@ -32,6 +34,13 @@ def initialize(args):
         type=str,
         default="graphs.pickle",
         help="The path to the output pickle file for the generated graphs."
+    )
+    parser.add_argument(
+        "-l",
+        "--log",
+        type=str,
+        default="generate_graphs.log",
+        help="The path to the log file. Default is generate_graphs.log."
     )
 
     args = parser.parse_args(args)
@@ -379,11 +388,17 @@ def mol_to_graph(mol, mol_df, aevs, extra_features=["atom_symbol",
 def main():
     t0 = time.time()
     args = initialize(sys.argv[1:])
-    sys.stdout = Logger("generate_graphs.log")
-    sys.stderr = Logger("generate_graphs.log")
+    sys.stdout = Logger(args.log)
+    sys.stderr = Logger(args.log)
 
+    print(f"Version of aev_plig: {aev_plig.__version__}")
+    print(f"Command line: {' '.join(sys.argv)}")
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Current time: {datetime.datetime.now()}\n")
+    
     # Step 1. Load data
     data = pd.read_csv(args.csv)
+    print(f"Generating graphs for the training set {args.csv} ...")
     print("The number of data points is ", len(data))
 
     # Step 2. Generate for all complexes: ANI-2x with 22 atom types. Only 2-atom interactions
