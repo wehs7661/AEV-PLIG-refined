@@ -39,9 +39,9 @@ cp {path_to_processed_bindingnet.csv} csv_files/ref_bindingnet.csv
 ```
 Then, we use the CLI `process_dataset` to generate the preprocessed datasets using the following commands:
 ```
-process_dataset -d ../../Data/PDBbind -ds pdbbind -r csv_files/ref_pdb
+process_dataset -d {path_to_pdbbind} -ds pdbbind -r csv_files/ref_pdb
 bind.csv -o csv_files/processed_pdbbind.csv  -l log_files/process_pdbbind.log
-process_dataset -d ../../Data/BindingNet/bindingnet_database -ds bindingnet -r csv_files/ref_bindingnet.csv -o csv_files/processed_bindingnet.csv -l log_files/
+process_dataset -d {path_to_bindingnet_database} -ds bindingnet -r csv_files/ref_bindingnet.csv -o csv_files/processed_bindingnet.csv -l log_files/
 process_bindingnet.log
 ```
 This will generate a CSV file containing necessary columns for graph generation by the CLI `generate_graphs` (see below), including `system_id`, `protein_path`, and `ligand_path`. This step should take just a few seconds for PDBbind and under two minutes for BindingNet.
@@ -50,8 +50,7 @@ This will generate a CSV file containing necessary columns for graph generation 
 To generate graphs for PDBbind and BindingNet, we run the following command:
 ```
 generate_graphs -c csv_files/processed_pdbbind.csv -o graphs/pdbbind_graphs.pickle -l log_files/generate_graphs_pdbbind.log
-generate_graphs -c csv_files/processed_bindingnet.csv -o graphs/bindingnet_graphs
-.pickle -l log_files/generate_graphs_bindingnet.log
+generate_graphs -c csv_files/processed_bindingnet.csv -o graphs/bindingnet_graphs.pickle -l log_files/generate_graphs_bindingnet.log
 ```
 The command takes 30 to 60 minutes to complete. For each dataset, the generated graphs are saved in a pickle file.
 
