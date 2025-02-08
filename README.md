@@ -11,33 +11,49 @@ cd AEV-PLIG
 pip install .
 ```
 
-## Demo
-This section demonstrates how to train your own AEV-PLIG model, and how to use AEV-PLIG to make predictions.
+## Reproducing the results from the paper
+In this section, we elaborate necessary steps to reproduce the results from the paper.
 
-### Training
-
-#### Download training data
-Download the training datasets PDBbind and BindingNet using the following commands:
+### 1. Download training data
+Execute the following commands to download and extract the training datasets PDBbind and BindingNet:
 ```
 wget http://pdbbind.org.cn/download/PDBbind_v2020_other_PL.tar.gz
 wget http://pdbbind.org.cn/download/PDBbind_v2020_refined.tar.gz
 wget http://bindingnet.huanglab.org.cn/api/api/download/binding_database
+
+tar -xvf PDBbind_v2020_other_PL.tar.gz
+tar -xvf PDBbind_v2020_refined.tar.gz
+mv binding_database binding_database.tar.gz
+tar -xvf binding_database.tar.gz
 ```
 
-#### Preprocess training data
-Before generating graphs for a dataset, we need to preprocess the dataset. Taking PDBbind as an example, we run the following command:
+### 2. Data processing
+In the folder `AEV_PLIG_project`, we first create folders including `csv_files`, `log_files`, and `graphs` to organize the files generated during this step. 
 ```
-process_dataset -ds pdbbind -d {path_to_pdbbind_dataset} -o {output_directory} 
+mkdir csv_files log_files graphs
 ```
-This will generate a CSV file containing necessary columns for graph generation by the CLI `generate_graphs` (see below), including `system_id`, `protein_path`, and `ligand_path`. This should take just a few seconds.
+Notably, to make sure we have exactly the same training data as the original paper, we use the datasets `processed_pdbbind.csv` and `processed_bindingnet.csv` in the original repo as reference datasets.
+```
+cp {path_to_processed_pdbbind.csv} csv_files/ref_pdbbind.csv
+cp {path_to_processed_bindingnet.csv} csv_files/ref_bindingnet.csv
+```
+Then, we use the CLI `process_dataset` to generate the preprocessed datasets using the following commands:
+```
+process_dataset -d ../../Data/PDBbind -ds pdbbind -r csv_files/ref_pdb
+bind.csv -o csv_files/processed_pdbbind.csv  -l log_files/process_pdbbind.log
+process_dataset -d ../../Data/BindingNet/bindingnet_database -ds bindingnet -r csv_files/ref_bindingnet.csv -o csv_files/processed_bindingnet.csv -l log_files/
+process_bindingnet.log
+```
+This will generate a CSV file containing necessary columns for graph generation by the CLI `generate_graphs` (see below), including `system_id`, `protein_path`, and `ligand_path`. This step should take just a few seconds for PDBbind and under two minutes for BindingNet.
 
-#### Generate PDBbind and BindingNet graphs
-To generate graphs for a dataset, e.g., PDBbind, run the following command:
+### 3. Graph generation
+To generate graphs for PDBbind and BindingNet, we run the following command:
 ```
-generate_graphs -c processed_pdbbind.csv -o graphs_pdbbind.pickle
+generate_graphs -c csv_files/processed_pdbbind.csv -o graphs/pdbbind_graphs.pickle -l log_files/generate_graphs_pdbbind.log
+generate_graphs -c csv_files/processed_bindingnet.csv -o graphs/bindingnet_graphs
+.pickle -l log_files/generate_graphs_bindingnet.log
 ```
-The command takes around 30 minutes in total to complete. The generated graphs are saved in a pickle file.
-
+The command takes 30 to 60 minutes to complete. For each dataset, the generated graphs are saved in a pickle file.
 
 ---
 #### Generate data for pytorch
