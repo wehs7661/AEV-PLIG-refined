@@ -26,7 +26,7 @@ def initialize(args):
         "--csv",
         type=str,
         required=True,
-        help="The path to the input processed CSV file. The CSV file should at least columns including 'system_id',\
+        help="The path to the input processed CSV file. The CSV file should at least have columns including 'system_id',\
             'protein_path', and 'ligand_path'."
     )
     parser.add_argument(
