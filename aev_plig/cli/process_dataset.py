@@ -90,7 +90,20 @@ def collect_entries(base_dir, dataset=None, ref_dataset=None):
                         })
 
     elif dataset == "bindingdb":
-        pass
+        target_dirs = [d for d in natsort.natsorted(glob.glob(os.path.join(base_dir, "*"))) if os.path.isdir(d)]
+        for target_dir in target_dirs:
+            pdb_id = os.path.basename(target_dir).split('_')[0]
+            protein_path = os.path.abspath(os.path.join(target_dir, f'{pdb_id}.pdb'))
+            ligand_paths = natsort.natsorted(glob.glob(os.path.join(target_dir, f'{pdb_id}-results_*.mol2')))
+            for ligand_path in ligand_paths:
+                num = os.path.basename(ligand_path).split('.mol2')[0].split('_')[-1]
+                system_id = f"{os.path.basename(target_dir)}_{num}"
+                data.append({
+                    "system_id": system_id,
+                    "protein_path": protein_path,
+                    "ligand_path": os.path.abspath(ligand_path)
+                })
+
     elif dataset == "neuralbind":
         pass
     else:
