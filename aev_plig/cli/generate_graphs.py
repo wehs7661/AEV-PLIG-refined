@@ -19,7 +19,7 @@ from aev_plig.utils import Logger
 
 def initialize(args):
     parser = argparse.ArgumentParser(
-        description='Generate graphs for the training set.'
+        description='This CLI generates graphs for the input dataset.'
     )
     parser.add_argument(
         "-c",
