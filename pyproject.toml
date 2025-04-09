@@ -21,11 +21,12 @@ readme = "README.md"
 requires-python = ">=3.8"
 
 # Declare any run-time dependencies that should be installed with the package.
+# Recommendation: Use conda/mamba to install torch-scatter, torchani, and ase
 dependencies = [
     "torch==2.5.0",
     "torchvision==0.20.0",
     "torchaudio==2.5.0",
-    "torch-scatter==2.1.2+pt25cu124",
+    "torch-scatter==2.1.2",
     "torch_geometric",
     "torchani",
     "rdkit",
@@ -34,6 +35,7 @@ dependencies = [
     "scikit-learn",
     "tqdm",
     "natsort",
+    "scipy",
 ]
 
 # Entry point for CLI commands

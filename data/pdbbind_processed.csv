@@ -1,4 +1,4 @@
-,PDB_code,-logKd/Ki,refined,core,split_core,max_tanimoto_schrodinger,max_tanimoto_merck,max_tanimoto_fep_benchmark
+,system_id,-logKd/Ki,refined,core,split_core,max_tanimoto_schrodinger,max_tanimoto_merck,max_tanimoto_fep_benchmark
 0,3zzf,0.4,False,False,train,0.1775700934579439,0.0795454545454545,0.2098765432098765
 1,3gww,0.45,False,False,train,0.3442622950819672,0.2751677852348993,0.375
 2,1w8l,0.49,False,False,train,0.1393442622950819,0.1171171171171171,0.1650485436893204
