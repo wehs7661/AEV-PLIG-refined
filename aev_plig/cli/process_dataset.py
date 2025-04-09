@@ -5,21 +5,22 @@ import glob
 import natsort
 import argparse
 import datetime
+import numpy as np
 import pandas as pd
 import aev_plig
 from aev_plig.utils import Logger
 
 def initialize(args):
     parser = argparse.ArgumentParser(
-        description="This CLI process an input dataset and returns a CSV file that works with the CLI generate_graphs."
+        description="This CLI processes an input dataset and returns a CSV file for graph generation."
     )
     parser.add_argument(
         "-ds",
         "--dataset",
         type=str,
         required=True,
-        choices=["pdbbind", "bindingnet", "bindingdb", "neuralbind"],
-        help="The dataset to process."
+        choices=["pdbbind", "hiqbind", "bindingdb", "bindingnet1", "bindingnet2", "neuralbind"],
+        help="The dataset to process. Options include pdbbind, bindingnet1, bindingnet2, bindingdb, and neuralbind."
     )
     parser.add_argument(
         "-d",
@@ -27,13 +28,6 @@ def initialize(args):
         type=str,
         required=True,
         help="The root directory containing the dataset."
-    )
-    parser.add_argument(
-        "-r",
-        "--ref",
-        type=str,
-        help="A reference dataset that contains filtered entries. The output will only contain entries that are\
-            in the reference dataset, with only necessary columns for graph generation."
     )
     parser.add_argument(
         "-o",
@@ -53,23 +47,115 @@ def initialize(args):
     return args
 
 
-def collect_entries(base_dir, dataset=None, ref_dataset=None):
+def calculate_pK(row):
+    """
+    Calculates the pK value from available binding affinity measurements. The priority order is;
+    Kd, Ki, and IC50. The units are assumed to be in nM.
+
+    Parameters
+    ----------
+    row : pandas.Series
+        A row from the binding affinity DataFrame.
+    
+    Returns
+    -------
+    pK: float
+        The calculated pK value.
+    """
+    priority = ["Kd(nM)", "Ki(nM)", "IC50(nM)"]
+    for measurement in priority:
+        if pd.notna(row[measurement]):
+            if isinstance(row[measurement], str):
+                if '>' in row[measurement] or '<' in row[measurement]:
+                    continue
+                data = row[measurement].split(";")
+                K_median = np.median([float(d) for d in data if d.strip()])
+                if K_median <= 0:
+                    continue
+                pK = -np.log10(K_median / 1e9)
+            else:
+                if row[measurement] <= 0:
+                    continue
+                pK = -np.log10(float(row[measurement]) / 1e9)
+            return pK
+    return None
+
+
+def collect_entries(base_dir, dataset=None):
     data = []
     if dataset == "pdbbind":
+        # Get the binding affinity data
+        df_files = [
+            os.path.join(base_dir, 'index', 'INDEX_refined_data.2020'),
+            os.path.join(base_dir, 'index', 'INDEX_general_PL_data.2020'),
+        ]
+        df_list = []
+        for file in df_files:
+            rows = []
+            with open(file, "r") as f:
+                for line in f:
+                    if line.startswith("#") or not line.strip():
+                        continue
+                    parts = line.strip().split(None, 5)[:-2]
+                    rows.append(parts)
+            df = pd.DataFrame(rows, columns=["system_id", "resolution", "year", "pK"])
+        df_list.append(df)
+        binding_df = pd.concat(df_list, ignore_index=True)     
+        binding_dict = dict(zip(binding_df["system_id"], binding_df["pK"]))
+        
+        # Get the file paths
         for subset_dir in ["refined-set", "v2020-other-PL"]:
             dirs = natsort.natsorted(glob.glob(os.path.join(base_dir, f'{subset_dir}/*')))
             for d in dirs:
                 base_name = os.path.basename(d)
                 if base_name not in ["index", "readme"]:
+                    system_id = base_name
+                    pK = binding_dict.get(system_id)
                     protein_path = os.path.abspath(os.path.join(d, f'{base_name}_protein.pdb'))
                     ligand_path = os.path.abspath(protein_path.replace('_protein.pdb', '_ligand.mol2'))
                     data.append({
-                        "system_id": base_name.split('_')[0],
+                        "system_id": system_id,
+                        "pK": pK,
                         "protein_path": protein_path,
-                        "ligand_path": ligand_path
+                        "ligand_path": ligand_path,
                     })
 
-    elif dataset == "bindingnet":
+    elif dataset == "hiqbind":
+        pass
+
+    elif dataset == "bindingdb":
+        target_dirs = [d for d in natsort.natsorted(glob.glob(os.path.join(base_dir, "*"))) if os.path.isdir(d)]
+        for target_dir in target_dirs:
+            pdb_id = os.path.basename(target_dir).split('_')[0]
+            csv_file = os.path.join(target_dir, f'{pdb_id}.csv')
+            if not os.path.exists(csv_file):
+                # Some entries in BindingDB do not have a .csv file
+                continue
+            
+            # Get the binding affinity data
+            df = pd.read_csv(csv_file)
+            df['suffix'] = df['Compound'].str.split('=').str[-1]
+            df['system_id'] = os.path.basename(target_dir) + '_' + df['suffix']
+            df['pK'] = df.apply(calculate_pK, axis=1)
+            df = df.dropna(subset=['pK'])
+            binding_dict = dict(zip(df['system_id'], df['pK']))
+            
+            # Get the file paths
+            protein_path = os.path.abspath(os.path.join(target_dir, f'{pdb_id}.pdb'))
+            ligand_paths = [os.path.join(target_dir, f'{pdb_id}-results_{s}.mol2') for s in df['suffix'].tolist()]
+            for ligand_path in ligand_paths:
+                assert os.path.exists(ligand_path), f"File {ligand_path} does not exist."
+                num = os.path.basename(ligand_path).split('.mol2')[0].split('_')[-1]
+                system_id = f"{os.path.basename(target_dir)}_{num}"
+                pK = binding_dict.get(system_id)
+                data.append({
+                    "system_id": system_id,
+                    "pK": pK,
+                    "protein_path": protein_path,
+                    "ligand_path": os.path.abspath(ligand_path)
+                })
+            
+    elif dataset == "bindingnet1":
         dirs = natsort.natsorted(glob.glob(os.path.join(base_dir, "from_chembl_client/*")))
         for d in dirs:
             base_name = os.path.basename(d)  # pdb id
@@ -89,31 +175,13 @@ def collect_entries(base_dir, dataset=None, ref_dataset=None):
                             "ligand_path": ligand_path
                         })
 
-    elif dataset == "bindingdb":
-        target_dirs = [d for d in natsort.natsorted(glob.glob(os.path.join(base_dir, "*"))) if os.path.isdir(d)]
-        for target_dir in target_dirs:
-            pdb_id = os.path.basename(target_dir).split('_')[0]
-            protein_path = os.path.abspath(os.path.join(target_dir, f'{pdb_id}.pdb'))
-            ligand_paths = natsort.natsorted(glob.glob(os.path.join(target_dir, f'{pdb_id}-results_*.mol2')))
-            for ligand_path in ligand_paths:
-                num = os.path.basename(ligand_path).split('.mol2')[0].split('_')[-1]
-                system_id = f"{os.path.basename(target_dir)}_{num}"
-                data.append({
-                    "system_id": system_id,
-                    "protein_path": protein_path,
-                    "ligand_path": os.path.abspath(ligand_path)
-                })
+    elif dataset == "bindingnet2":
+        pass
 
     elif dataset == "neuralbind":
         pass
     else:
         raise ValueError("Invalid dataset.")
-
-    # Filter entries based on the reference dataset
-    if ref_dataset is not None:
-        ref_df = pd.read_csv(ref_dataset)
-        ref_ids = ref_df["system_id"].tolist()
-        data = [entry for entry in data if entry["system_id"] in ref_ids]
 
     return data
 
@@ -131,7 +199,7 @@ def main():
 
     print(f"Processing {args.dataset} ...")
     args.output = f"processed_{args.dataset}.csv" if args.output is None else args.output
-    data = collect_entries(args.dir, args.dataset, args.ref)
+    data = collect_entries(args.dir, args.dataset)
     df = pd.DataFrame(data)
     df.to_csv(args.output, index=False)
     print(f"Elapsed time: {time.time() - t0:.2f} seconds")
