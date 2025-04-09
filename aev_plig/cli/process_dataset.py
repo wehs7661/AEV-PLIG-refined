@@ -19,7 +19,7 @@ def initialize(args):
         "--dataset",
         type=str,
         required=True,
-        choices=["pdbbind", "hiqbind", "bindingdb", "bindingnet1", "bindingnet2", "neuralbind"],
+        choices=["pdbbind", "hiqbind", "bindingdb", "bindingnet_v1", "bindingnet_v2", "neuralbind"],
         help="The dataset to process. Options include pdbbind, bindingnet1, bindingnet2, bindingdb, and neuralbind."
     )
     parser.add_argument(
@@ -85,12 +85,12 @@ def collect_entries(base_dir, dataset=None):
     data = []
     if dataset == "pdbbind":
         # Get the binding affinity data
-        df_files = [
+        index_files = [
             os.path.join(base_dir, 'index', 'INDEX_refined_data.2020'),
             os.path.join(base_dir, 'index', 'INDEX_general_PL_data.2020'),
         ]
         df_list = []
-        for file in df_files:
+        for file in index_files:
             rows = []
             with open(file, "r") as f:
                 for line in f:
@@ -155,27 +155,29 @@ def collect_entries(base_dir, dataset=None):
                     "ligand_path": os.path.abspath(ligand_path)
                 })
             
-    elif dataset == "bindingnet1":
-        dirs = natsort.natsorted(glob.glob(os.path.join(base_dir, "from_chembl_client/*")))
-        for d in dirs:
-            base_name = os.path.basename(d)  # pdb id
-            if base_name not in ["index", "PDBbind_minimized"]:
-                target_dirs = natsort.natsorted(glob.glob(os.path.join(d, "target_CHEMBL*")))
-                for target_dir in target_dirs:
-                    ligand_dirs = natsort.natsorted(glob.glob(os.path.join(target_dir, "CHEMBL*")))
-                    for ligand_dir in ligand_dirs:
-                        target_chembl = os.path.basename(target_dir).split('_')[-1]
-                        ligand_chembl = os.path.basename(ligand_dir)
-                        system_id = f"{target_chembl}_{base_name}_{ligand_chembl}"
-                        protein_path = os.path.abspath(os.path.join(d, 'rec_h_opt.pdb'))
-                        ligand_path = os.path.abspath(os.path.join(ligand_dir, f'{base_name}_{target_chembl}_{ligand_chembl}.sdf'))
-                        data.append({
-                            "system_id": system_id,
-                            "protein_path": protein_path,
-                            "ligand_path": ligand_path
-                        })
+    elif dataset == "bindingnet_v1":
+        # Get the binding affinity data
+        index_file = os.path.join(base_dir, "from_chembl_client", "index", "For_ML", "BindingNet_Uw_final_median.csv")
+        df = pd.read_csv(index_file, sep="\t")
+        system_ids = df["unique_identify"].tolist()
+        binding_dict = dict(zip(df["unique_identify"], df["-logAffi"]))
 
-    elif dataset == "bindingnet2":
+        # Get the file paths
+        for system_id in system_ids:
+            target_chembl = system_id.split("_")[0]
+            pdb_id = system_id.split("_")[1]
+            ligand_chembl = system_id.split("_")[2]
+            protein_path = os.path.abspath(os.path.join(base_dir, "from_chembl_client", pdb_id, 'rec_h_opt.pdb'))
+            ligand_path = os.path.abspath(os.path.join(base_dir, "from_chembl_client", pdb_id, f"target_{target_chembl}", ligand_chembl, f"{pdb_id}_{target_chembl}_{ligand_chembl}.sdf"))
+            pK = binding_dict.get(system_id)
+            data.append({
+                "system_id": system_id,
+                "pK": pK,
+                "protein_path": protein_path,
+                "ligand_path": ligand_path
+            })
+
+    elif dataset == "bindingnet_v2":
         pass
 
     elif dataset == "neuralbind":
