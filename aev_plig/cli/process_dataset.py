@@ -121,7 +121,41 @@ def collect_entries(base_dir, dataset=None):
                     })
 
     elif dataset == "hiqbind":
-        pass
+        # Get the binding affinity data
+        index_sm = os.path.join(base_dir, "hiqbind_sm_metadata.csv")
+        df_sm = pd.read_csv(index_sm)
+        df_sm['subset'] = "sm"
+
+        index_poly = os.path.join(base_dir, "hiqbind_poly_metadata.csv")
+        df_poly = pd.read_csv(index_poly)
+        df_poly['subset'] = "poly"
+
+        df = pd.concat([df_sm, df_poly], ignore_index=True)
+
+        # Get the file paths
+        for _, row in df.iterrows():
+            pdb_id = row["PDBID"]
+            ligand_name = row["Ligand Name"]
+            ligand_chain = row["Ligand Chain"]
+            ligand_resnum = row["Ligand Residue Number"]
+            pK = row["Log Binding Affinity"]
+            subset = row["subset"]
+
+            system_id = f"{pdb_id}_{ligand_chain}_{ligand_resnum}"
+            protein_path = os.path.abspath(os.path.join(
+                base_dir,
+                f"raw_data_hiq_{subset}",
+                pdb_id,
+                f"{pdb_id}_{ligand_name}_{ligand_chain}_{ligand_resnum}",
+                f"{pdb_id}_{ligand_name}_{ligand_chain}_{ligand_resnum}_protein_refined.pdb"
+            ))
+            ligand_path = protein_path.replace("_protein_refined.pdb", "_ligand_refined.sdf")
+            data.append({
+                "system_id": system_id,
+                "pK": pK,
+                "protein_path": protein_path,
+                "ligand_path": ligand_path,
+            })
 
     elif dataset == "bindingdb":
         target_dirs = [d for d in natsort.natsorted(glob.glob(os.path.join(base_dir, "*"))) if os.path.isdir(d)]
