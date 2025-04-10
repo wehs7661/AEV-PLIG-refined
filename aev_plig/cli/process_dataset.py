@@ -125,7 +125,7 @@ class PDBBindCollector(DatasetCollector):
                     continue
                 system_id = base_name
                 pK = binding_dict.get(system_id)
-                protein_path = os.path.abspath(os.path.join(d, f'{base_name}_protein.pdb'))
+                protein_path = os.path.abspath(os.path.join(dir_path, f'{base_name}_protein.pdb'))
                 ligand_path = os.path.abspath(protein_path.replace('_protein.pdb', '_ligand.mol2'))
                 self._add_entry(system_id, pK, protein_path, ligand_path)
         
@@ -237,7 +237,7 @@ class BindingDBCollector(DatasetCollector):
         df : pandas.DataFrame
             A DataFrame with system_id, pK, protein_path, and ligand_path for HiQBind entries.
         """
-        target_dirs = [d for d in natsort.natsorted(glob.glob(os.path.join(base_dir, "*"))) if os.path.isdir(d)]
+        target_dirs = [d for d in natsort.natsorted(glob.glob(os.path.join(self.base_dir, "*"))) if os.path.isdir(d)]
         for target_dir in target_dirs:
             pdb_id = os.path.basename(target_dir).split('_')[0]
             csv_file = os.path.join(target_dir, f'{pdb_id}.csv')
@@ -298,177 +298,37 @@ class BindingDBCollector(DatasetCollector):
                 return pK
         return None
 
+def collect_entries(base_dir, dataset):
+    """
+    Factory function to collect entries from the specified dataset.
+    
+    Parameters
+    ----------
+    base_dir : str
+        The base directory containing the dataset files.
+    dataset : str
+        The name of the dataset to process. Options include pdbbind, hiqbind, bindingdb, bindingnet_v1,
+        bindingnet_v2, and neuralbind.
 
-
-
-
-def collect_entries(base_dir, dataset=None):
-    data = []
-    if dataset == "pdbbind":
-        # Get the binding affinity data
-        index_files = [
-            os.path.join(base_dir, 'index', 'INDEX_refined_data.2020'),
-            os.path.join(base_dir, 'index', 'INDEX_general_PL_data.2020'),
-        ]
-        df_list = []
-        for file in index_files:
-            rows = []
-            with open(file, "r") as f:
-                for line in f:
-                    if line.startswith("#") or not line.strip():
-                        continue
-                    parts = line.strip().split(None, 5)[:-2]
-                    rows.append(parts)
-            df = pd.DataFrame(rows, columns=["system_id", "resolution", "year", "pK"])
-        df_list.append(df)
-        binding_df = pd.concat(df_list, ignore_index=True)     
-        binding_dict = dict(zip(binding_df["system_id"], binding_df["pK"]))
-        
-        # Get the file paths
-        for subset_dir in ["refined-set", "v2020-other-PL"]:
-            dirs = natsort.natsorted(glob.glob(os.path.join(base_dir, f'{subset_dir}/*')))
-            for d in dirs:
-                base_name = os.path.basename(d)
-                if base_name not in ["index", "readme"]:
-                    system_id = base_name
-                    pK = binding_dict.get(system_id)
-                    protein_path = os.path.abspath(os.path.join(d, f'{base_name}_protein.pdb'))
-                    ligand_path = os.path.abspath(protein_path.replace('_protein.pdb', '_ligand.mol2'))
-                    assert os.path.exists(protein_path), f"File {protein_path} does not exist."
-                    data.append({
-                        "system_id": system_id,
-                        "pK": pK,
-                        "protein_path": protein_path,
-                        "ligand_path": ligand_path,
-                    })
-
-    elif dataset == "hiqbind":
-        # Get the binding affinity data
-        index_sm = os.path.join(base_dir, "hiqbind_sm_metadata.csv")
-        df_sm = pd.read_csv(index_sm)
-        df_sm['subset'] = "sm"
-
-        index_poly = os.path.join(base_dir, "hiqbind_poly_metadata.csv")
-        df_poly = pd.read_csv(index_poly)
-        df_poly['subset'] = "poly"
-
-        df = pd.concat([df_sm, df_poly], ignore_index=True)
-
-        # Get the file paths
-        for _, row in df.iterrows():
-            pdb_id = row["PDBID"]
-            ligand_name = row["Ligand Name"]
-            ligand_chain = row["Ligand Chain"]
-            ligand_resnum = row["Ligand Residue Number"]
-            pK = row["Log Binding Affinity"]
-            subset = row["subset"]
-
-            system_id = f"{pdb_id}_{ligand_chain}_{ligand_resnum}"
-            protein_path = os.path.abspath(os.path.join(
-                base_dir,
-                f"raw_data_hiq_{subset}",
-                pdb_id,
-                f"{pdb_id}_{ligand_name}_{ligand_chain}_{ligand_resnum}",
-                f"{pdb_id}_{ligand_name}_{ligand_chain}_{ligand_resnum}_protein_refined.pdb"
-            ))
-            ligand_path = protein_path.replace("_protein_refined.pdb", "_ligand_refined.sdf")
-            assert os.path.exists(protein_path), f"File {protein_path} does not exist."
-            data.append({
-                "system_id": system_id,
-                "pK": pK,
-                "protein_path": protein_path,
-                "ligand_path": ligand_path,
-            })
-
-    elif dataset == "bindingdb":
-        target_dirs = [d for d in natsort.natsorted(glob.glob(os.path.join(base_dir, "*"))) if os.path.isdir(d)]
-        for target_dir in target_dirs:
-            pdb_id = os.path.basename(target_dir).split('_')[0]
-            csv_file = os.path.join(target_dir, f'{pdb_id}.csv')
-            if not os.path.exists(csv_file):
-                # Some entries in BindingDB do not have a .csv file
-                continue
-            
-            # Get the binding affinity data
-            df = pd.read_csv(csv_file)
-            df['suffix'] = df['Compound'].str.split('=').str[-1]
-            df['system_id'] = os.path.basename(target_dir) + '_' + df['suffix']
-            df['pK'] = df.apply(calculate_pK, axis=1)
-            df = df.dropna(subset=['pK'])
-            binding_dict = dict(zip(df['system_id'], df['pK']))
-            
-            # Get the file paths
-            protein_path = os.path.abspath(os.path.join(target_dir, f'{pdb_id}.pdb'))
-            ligand_paths = [os.path.join(target_dir, f'{pdb_id}-results_{s}.mol2') for s in df['suffix'].tolist()]
-            for ligand_path in ligand_paths:
-                assert os.path.exists(ligand_path), f"File {ligand_path} does not exist."
-                num = os.path.basename(ligand_path).split('.mol2')[0].split('_')[-1]
-                system_id = f"{os.path.basename(target_dir)}_{num}"
-                pK = binding_dict.get(system_id)
-                data.append({
-                    "system_id": system_id,
-                    "pK": pK,
-                    "protein_path": protein_path,
-                    "ligand_path": os.path.abspath(ligand_path)
-                })
-            
-    elif dataset == "bindingnet_v1":
-        # Get the binding affinity data
-        index_file = os.path.join(base_dir, "from_chembl_client", "index", "For_ML", "BindingNet_Uw_final_median.csv")
-        df = pd.read_csv(index_file, sep="\t")
-        system_ids = df["unique_identify"].tolist()
-        binding_dict = dict(zip(df["unique_identify"], df["-logAffi"]))
-
-        # Get the file paths
-        for system_id in system_ids:
-            target_chembl = system_id.split("_")[0]
-            pdb_id = system_id.split("_")[1]
-            ligand_chembl = system_id.split("_")[2]
-            protein_path = os.path.abspath(os.path.join(base_dir, "from_chembl_client", pdb_id, 'rec_h_opt.pdb'))
-            ligand_path = os.path.abspath(os.path.join(base_dir, "from_chembl_client", pdb_id, f"target_{target_chembl}", ligand_chembl, f"{pdb_id}_{target_chembl}_{ligand_chembl}.sdf"))
-            assert os.path.exists(protein_path), f"File {protein_path} does not exist."
-            pK = binding_dict.get(system_id)
-            data.append({
-                "system_id": system_id,
-                "pK": pK,
-                "protein_path": protein_path,
-                "ligand_path": ligand_path
-            })
-
-    elif dataset == "bindingnet_v2":
-        # Get the binding affinity data
-        index_file = os.path.join(base_dir, "Index_for_BindingNetv1_and_BindingNetv2.csv")
-        df = pd.read_csv(index_file)
-        df = df[df['Dataset'] == 'BindingNet v2']
-        df['subset'] = pd.cut(df['SHAFTS HybridScore'], bins=[-float('inf'), 1.0, 1.2, float('inf')], labels=['low', 'moderate', 'high'], right=False)
-        df['system_id'] = df['Target ChEMBLID'] + '_' + df['Molecule ChEMBLID']
-        system_ids = df['system_id'].tolist()
-        binding_dict = dict(zip(df['system_id'], df['-logAffi']))
-        
-        # Get the file paths
-        for _, row in df.iterrows():
-            system_id = row['system_id']
-            pK = binding_dict.get(system_id)
-            subset = row['subset']
-            target_chembl = system_id.split("_")[0]
-            ligand_chembl = system_id.split("_")[1]
-            protein_path = os.path.abspath(os.path.join(base_dir, subset, f"target_{target_chembl}", f"{ligand_chembl}", "protein.pdb"))
-            ligand_path = protein_path.replace("protein.pdb", "ligand.sdf")
-            assert os.path.exists(protein_path), f"File {protein_path} does not exist."
-            data.append({
-                "system_id": system_id,
-                "pK": pK,
-                "protein_path": protein_path,
-                "ligand_path": ligand_path
-            })
-
-    elif dataset == "neuralbind":
-        pass
-    else:
-        raise ValueError("Invalid dataset.")
-
-    df = pd.DataFrame(data)
-
+    Returns
+    -------
+    df : pandas.DataFrame
+        A DataFrame with system_id, pK, protein_path, and ligand_path for the specified dataset.
+    """
+    collectors = {
+        "pdbbind": PDBBindCollector,
+        "hiqbind": HiQBindCollector,
+        "bindingdb": BindingDBCollector,
+        # "bindingnet_v1": BindingNetV1Collector,
+        # "bindingnet_v2": BindingNetV2Collector,
+        # "neuralbind": NeuralBindCollector
+    }
+    
+    if dataset not in collectors:
+        raise ValueError(f"Invalid dataset: {dataset}. Available options are: {', '.join(collectors.keys())}.")
+    
+    collector = collectors[dataset](base_dir)
+    df = collector.collect()
     return df
 
 
