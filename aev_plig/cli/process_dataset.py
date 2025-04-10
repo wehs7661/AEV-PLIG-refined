@@ -298,6 +298,90 @@ class BindingDBCollector(DatasetCollector):
                 return pK
         return None
 
+class BindingNetV1Collector(DatasetCollector):
+    """
+    Collector for BindingNet v1 dataset.
+    """
+
+    def collect(self):
+        """
+        Collect entries from the BindingNet v1 dataset.
+
+        Returns
+        -------
+        df : pandas.DataFrame
+            A DataFrame with system_id, pK, protein_path, and ligand_path for BindingNet V1 entries.
+        """
+        # 1. Load binding affinity data
+        index_file = os.path.join(self.base_dir, "from_chembl_client", "index", "For_ML", "BindingNet_Uw_final_median.csv")
+        df = pd.read_csv(index_file, sep="\t")
+        system_ids = df["unique_identify"].tolist()
+        binding_dict = dict(zip(df["unique_identify"], df["-logAffi"]))
+        
+        # 2. Collect file paths
+        for system_id in system_ids:
+            target_chembl, pdb_id, ligand_chembl = system_id.split("_")
+            protein_path = os.path.join(self.base_dir, "from_chembl_client", pdb_id, "rec_h_opt.pdb")
+            ligand_path = os.path.join(
+                self.base_dir,
+                "from_chembl_client",
+                pdb_id, 
+                f"target_{target_chembl}",
+                ligand_chembl, 
+                f"{pdb_id}_{target_chembl}_{ligand_chembl}.sdf"
+            )
+            pK = binding_dict.get(system_id)
+            self._add_entry(system_id, pK, protein_path, ligand_path)
+        
+        df = pd.DataFrame(self.data)
+        return df
+
+class BindingNetV2Collector(DatasetCollector):
+    """
+    Collector for BindingNet v2 dataset.
+    """
+
+    def collect(self):
+        """
+        Collect entries from the BindingNet v2 dataset.
+
+        Returns
+        -------
+        df : pandas.DataFrame
+            A DataFrame with system_id, pK, protein_path, and ligand_path for BindingNet V2 entries.
+        """
+        # 1. Load binding affinity data
+        index_file = os.path.join(self.base_dir, "Index_for_BindingNetv1_and_BindingNetv2.csv")
+        df = pd.read_csv(index_file)
+        df = df[df['Dataset'] == 'BindingNet v2']
+        df['subset'] = pd.cut(
+            df['SHAFTS HybridScore'], 
+            bins=[-float('inf'), 1.0, 1.2, float('inf')], 
+            labels=['low', 'moderate', 'high'], 
+            right=False  # Include the left edge, exclude the right edge
+        )
+        df['system_id'] = df['Target ChEMBLID'] + '_' + df['Molecule ChEMBLID']
+        binding_dict = dict(zip(df['system_id'], df['-logAffi']))
+        
+        # 2. Collect file paths
+        for _, row in df.iterrows():
+            system_id = row['system_id']
+            pK = binding_dict.get(system_id)
+            subset = row['subset']
+            target_chembl, ligand_chembl = system_id.split("_")
+            protein_path = os.path.join(
+                self.base_dir, subset, 
+                f"target_{target_chembl}",
+                ligand_chembl, 
+                "protein.pdb"
+            )
+            ligand_path = protein_path.replace("protein.pdb", "ligand.sdf")
+            self._add_entry(system_id, pK, protein_path, ligand_path)
+        
+        df = pd.DataFrame(self.data)
+        return df
+
+
 def collect_entries(base_dir, dataset):
     """
     Factory function to collect entries from the specified dataset.
@@ -319,8 +403,8 @@ def collect_entries(base_dir, dataset):
         "pdbbind": PDBBindCollector,
         "hiqbind": HiQBindCollector,
         "bindingdb": BindingDBCollector,
-        # "bindingnet_v1": BindingNetV1Collector,
-        # "bindingnet_v2": BindingNetV2Collector,
+        "bindingnet_v1": BindingNetV1Collector,
+        "bindingnet_v2": BindingNetV2Collector,
         # "neuralbind": NeuralBindCollector
     }
     
