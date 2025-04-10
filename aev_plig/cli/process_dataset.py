@@ -113,6 +113,7 @@ def collect_entries(base_dir, dataset=None):
                     pK = binding_dict.get(system_id)
                     protein_path = os.path.abspath(os.path.join(d, f'{base_name}_protein.pdb'))
                     ligand_path = os.path.abspath(protein_path.replace('_protein.pdb', '_ligand.mol2'))
+                    assert os.path.exists(protein_path), f"File {protein_path} does not exist."
                     data.append({
                         "system_id": system_id,
                         "pK": pK,
@@ -150,6 +151,7 @@ def collect_entries(base_dir, dataset=None):
                 f"{pdb_id}_{ligand_name}_{ligand_chain}_{ligand_resnum}_protein_refined.pdb"
             ))
             ligand_path = protein_path.replace("_protein_refined.pdb", "_ligand_refined.sdf")
+            assert os.path.exists(protein_path), f"File {protein_path} does not exist."
             data.append({
                 "system_id": system_id,
                 "pK": pK,
@@ -203,6 +205,7 @@ def collect_entries(base_dir, dataset=None):
             ligand_chembl = system_id.split("_")[2]
             protein_path = os.path.abspath(os.path.join(base_dir, "from_chembl_client", pdb_id, 'rec_h_opt.pdb'))
             ligand_path = os.path.abspath(os.path.join(base_dir, "from_chembl_client", pdb_id, f"target_{target_chembl}", ligand_chembl, f"{pdb_id}_{target_chembl}_{ligand_chembl}.sdf"))
+            assert os.path.exists(protein_path), f"File {protein_path} does not exist."
             pK = binding_dict.get(system_id)
             data.append({
                 "system_id": system_id,
@@ -216,7 +219,7 @@ def collect_entries(base_dir, dataset=None):
         index_file = os.path.join(base_dir, "Index_for_BindingNetv1_and_BindingNetv2.csv")
         df = pd.read_csv(index_file)
         df = df[df['Dataset'] == 'BindingNet v2']
-        df['subset'] = pd.cut(df['SHAFTS HybridScore'], bins=[-float('inf'), 1.0, 1.2, float('inf')], labels=['low', 'moderate', 'high'])
+        df['subset'] = pd.cut(df['SHAFTS HybridScore'], bins=[-float('inf'), 1.0, 1.2, float('inf')], labels=['low', 'moderate', 'high'], right=False)
         df['system_id'] = df['Target ChEMBLID'] + '_' + df['Molecule ChEMBLID']
         system_ids = df['system_id'].tolist()
         binding_dict = dict(zip(df['system_id'], df['-logAffi']))
@@ -230,6 +233,7 @@ def collect_entries(base_dir, dataset=None):
             ligand_chembl = system_id.split("_")[1]
             protein_path = os.path.abspath(os.path.join(base_dir, subset, f"target_{target_chembl}", f"{ligand_chembl}", "protein.pdb"))
             ligand_path = protein_path.replace("protein.pdb", "ligand.sdf")
+            assert os.path.exists(protein_path), f"File {protein_path} does not exist."
             data.append({
                 "system_id": system_id,
                 "pK": pK,
@@ -242,7 +246,9 @@ def collect_entries(base_dir, dataset=None):
     else:
         raise ValueError("Invalid dataset.")
 
-    return data
+    df = pd.DataFrame(data)
+
+    return df
 
 
 def main():
@@ -258,7 +264,6 @@ def main():
 
     print(f"Processing {args.dataset} ...")
     args.output = f"processed_{args.dataset}.csv" if args.output is None else args.output
-    data = collect_entries(args.dir, args.dataset)
-    df = pd.DataFrame(data)
+    df = collect_entries(args.dir, args.dataset)
     df.to_csv(args.output, index=False)
     print(f"Elapsed time: {time.time() - t0:.2f} seconds")
