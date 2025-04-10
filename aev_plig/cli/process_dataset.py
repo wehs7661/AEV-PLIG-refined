@@ -212,7 +212,30 @@ def collect_entries(base_dir, dataset=None):
             })
 
     elif dataset == "bindingnet_v2":
-        pass
+        # Get the binding affinity data
+        index_file = os.path.join(base_dir, "Index_for_BindingNetv1_and_BindingNetv2.csv")
+        df = pd.read_csv(index_file)
+        df = df[df['Dataset'] == 'BindingNet v2']
+        df['subset'] = pd.cut(df['SHAFTS HybridScore'], bins=[-float('inf'), 1.0, 1.2, float('inf')], labels=['low', 'moderate', 'high'])
+        df['system_id'] = df['Target ChEMBLID'] + '_' + df['Molecule ChEMBLID']
+        system_ids = df['system_id'].tolist()
+        binding_dict = dict(zip(df['system_id'], df['-logAffi']))
+        
+        # Get the file paths
+        for _, row in df.iterrows():
+            system_id = row['system_id']
+            pK = binding_dict.get(system_id)
+            subset = row['subset']
+            target_chembl = system_id.split("_")[0]
+            ligand_chembl = system_id.split("_")[1]
+            protein_path = os.path.abspath(os.path.join(base_dir, subset, f"target_{target_chembl}", f"{ligand_chembl}", "protein.pdb"))
+            ligand_path = protein_path.replace("protein.pdb", "ligand.sdf")
+            data.append({
+                "system_id": system_id,
+                "pK": pK,
+                "protein_path": protein_path,
+                "ligand_path": ligand_path
+            })
 
     elif dataset == "neuralbind":
         pass
