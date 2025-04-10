@@ -66,6 +66,25 @@ def initialize(args):
 
 
 def parse_filter(filter_str):
+    """
+    Parse the filter string into column, operator, and value.
+    The filter string should be in the following format: <column> <operator> <value>.
+    For example: 'max_tanimoto_schrodinger < 0.9'.
+
+    Parameters
+    ----------
+    filter_str : str
+        The filter string to parse.
+    
+    Returns
+    -------
+    column : str
+        The column name to filter on.
+    operator : str
+        The operator to use for filtering. Supported operators are: <, <=, >, >=, ==, !=.
+    value : str or float
+        The value to compare against. This will be converted to a float if possible.
+    """
     # This regex will capture: column, operator, and value.
     pattern = r'(\w+)\s*(<=|>=|==|!=|<|>)\s*(.+)'
     match = re.match(pattern, filter_str)
@@ -85,6 +104,25 @@ def parse_filter(filter_str):
 
 
 def apply_filter(df, column, operator, value):
+    """
+    Apply the filter to the DataFrame based on the column, operator, and value.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The DataFrame to filter.
+    column : str
+        The column name to filter on.
+    operator : str
+        The operator to use for filtering. Supported operators are: <, <=, >, >=, ==, !=.
+    value : str or float
+        The value to compare against. This will be converted to a float if possible.
+    
+    Returns
+    -------
+    pd.DataFrame
+        The filtered DataFrame.
+    """
     if operator == '<':
         return df[df[column] < value]
     elif operator == '>':
