@@ -70,7 +70,11 @@ def parse_filter(filter_str):
     pattern = r'(\w+)\s*(<=|>=|==|!=|<|>)\s*(.+)'
     match = re.match(pattern, filter_str)
     if not match:
-        raise ValueError(f"Filter '{filter_str}' is not in the correct format.")
+        raise ValueError(
+            f"Filter '{filter_str}' is not in the correct format. "
+            f"Expected format: <column> <operator> <value>. "
+            f"Example: 'max_tanimoto_schrodinger < 0.9'."
+        )
     column, operator, value = match.groups()
     # Convert value to a float if possible, else keep as string
     try:
