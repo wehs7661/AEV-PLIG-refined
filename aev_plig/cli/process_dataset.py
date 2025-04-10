@@ -381,8 +381,68 @@ class BindingNetV2Collector(DatasetCollector):
         df = pd.DataFrame(self.data)
         return df
 
+class NeuralBindCollector(DatasetCollector):
+    """
+    Collector for NeuralBind dataset.
+    """
+    def collect(self):
+        """
+        Collect entries from the NeuralBind dataset. (placeholder)
 
-def collect_entries(base_dir, dataset):
+        Returns
+        -------
+        df : pandas.DataFrame
+            A DataFrame with system_id, pK, protein_path, and ligand_path for NeuralBind entries.
+        """
+        # To be implemented
+        pass
+
+class CustomDatasetCollector(DatasetCollector):
+    """
+    Collector for a user-defined custom dataset.
+    """
+    def __init__(self, base_dir, config):
+        """
+        Initializes the CustomDatasetCollector with a base directory and configuration.
+
+        Parameters
+        ----------
+        base_dir : str
+            The base directory containing dataset files.
+        config : dict
+            Configuration dictionary with the following keys:
+              - index_file: Path to the index file relative to base_dir.
+              - system_id_col: Column name for system ID.
+              - pK_col: Column name for pK values.
+              - protein_path_template: Template string for protein file paths relative to base_dir.
+              - ligand_path_template: Template string for ligand file paths relative to base_dir.
+        """
+        super().__init__(base_dir)
+        self.index_file = os.path.join(base_dir, config["index_file"])
+        self.system_id_col = config["system_id_col"]
+        self.pK_col = config.get("pK_col")
+        self.protein_path_template = config["protein_path_template"]
+        self.ligand_path_template = config["ligand_path_template"]
+
+    def collect(self):
+        """Collect entries from a custom dataset based on the provided config.
+
+        Returns
+        -------
+        df : pandas.DataFrame
+            A DataFrame with system_id, pK, protein_path, and ligand_path for the custom dataset entries.
+        """
+        df = pd.read_csv(self.index_file)
+        for _, row in df.iterrows():
+            system_id = row[self.system_id_col]
+            pK = row[self.pK_col] if self.pK_col and pd.notna(row[self.pK_col]) else None
+            protein_path = os.path.join(self.base_dir, self.protein_path_template.format(system_id=system_id, **row.to_dict()))
+            ligand_path = os.path.join(self.base_dir, self.ligand_path_template.format(system_id=system_id, **row.to_dict()))
+            self._add_entry(system_id, pK, protein_path, ligand_path)
+        return pd.DataFrame(self.data)
+
+
+def collect_entries(base_dir, dataset, config=None):
     """
     Factory function to collect entries from the specified dataset.
     
@@ -392,7 +452,14 @@ def collect_entries(base_dir, dataset):
         The base directory containing the dataset files.
     dataset : str
         The name of the dataset to process. Options include pdbbind, hiqbind, bindingdb, bindingnet_v1,
-        bindingnet_v2, and neuralbind.
+        bindingnet_v2, neuralbind, and custom.
+    config : dict
+        A configuration dictionary for custom datasets. Required keys are:
+          - index_file: Path to the index file relative to base_dir.
+          - system_id_col: Column name for system ID.
+          - pK_col: Column name for pK values.
+          - protein_path_template: Template string for protein file paths.
+          - ligand_path_template: Template string for ligand file paths.
 
     Returns
     -------
@@ -405,13 +472,18 @@ def collect_entries(base_dir, dataset):
         "bindingdb": BindingDBCollector,
         "bindingnet_v1": BindingNetV1Collector,
         "bindingnet_v2": BindingNetV2Collector,
-        # "neuralbind": NeuralBindCollector
+        "neuralbind": NeuralBindCollector,
+        "custom": CustomDatasetCollector,
     }
     
     if dataset not in collectors:
         raise ValueError(f"Invalid dataset: {dataset}. Available options are: {', '.join(collectors.keys())}.")
-    
-    collector = collectors[dataset](base_dir)
+    if dataset == "custom":
+        if not config:
+            raise ValueError("Custom dataset requires a configuration dictionary.")
+        collector = collectors[dataset](base_dir, config)
+    else:
+        collector = collectors[dataset](base_dir)
     df = collector.collect()
     return df
 
