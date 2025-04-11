@@ -1,60 +1,188 @@
-import pandas as pd
+import os
+import re
+import sys
+import time
+import glob
 import pickle
-from utils import GraphDataset
-
-"""
-Load graphs
-"""
-print("loading graph from pickle file for pdbbind2020")
-with open("data/pdbbind.pickle", 'rb') as handle:
-    pdbbind_graphs = pickle.load(handle)
+import argparse
+import datetime
+import aev_plig
+import pandas as pd
+from aev_plig import utils
 
 
-print("loading graph from pickle file for BindingNet")
-with open("data/bindingnet.pickle", 'rb') as handle:
-    bindingnet_graphs = pickle.load(handle)
+def initialize(args):
+    parser = argparse.ArgumentParser(
+        description="This CLI process pickled graphs and create PyTorch data ready for training."
+    )
+    parser.add_argument(
+        "-d",
+        "--dir",
+        type=str,
+        required=True,
+        help="The directory containing the pickled graphs."
+    )
+    parser.add_argument(
+        "-c",
+        "--csv_files",
+        type=str,
+        nargs='+',
+        required=True,
+        help="The paths to the input processed CSV files, each corresponding to a pickled graph. Each CSV file \
+            should at least have columns including 'system_id', 'protein_path', 'ligand_path', 'pK', and 'split'."
+    )
+    parser.add_argument(
+        "-f",
+        "--filters",
+        nargs='+',
+        type=str,
+        help="The filters to apply to the dataset. The filters are in the format of 'column_name operator value'.\
+            For example, 'max_tanimoto_schrodinger < 0.9' will filter out entries with maximum Tanimoto similarity\
+            to Schrodinger dataset less than 0.9. The operators include '<', '<=', '>', '>=', '==', and '!='."
+    )
+    parser.add_argument(
+        "-p",
+        "--prefix",
+        type=str,
+        default="dataset",
+        help="The prefix of the output PyTorch files. Default is 'dataset'."
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        help="The output directory. Default is the same as the input directory."
+    )
+    parser.add_argument(
+        "-l",
+        "--log",
+        type=str,
+        default="create_pytorch_data.log",
+        help="The path to the log file. Default is create_pytorch_data.log."
+    )
 
-graphs_dict = {**pdbbind_graphs, **bindingnet_graphs}
-
-"""
-Generate data for enriched training for <0.9 Tanimoto to Schrodinger/Merck
-"""
-pdbbind = pd.read_csv("data/pdbbind_processed.csv", index_col=0)
-pdbbind = pdbbind[['PDB_code','-logKd/Ki','split_core','max_tanimoto_schrodinger','max_tanimoto_merck']]
-pdbbind = pdbbind.rename(columns={'PDB_code':'unique_id', 'split_core':'split', '-logKd/Ki':'pK'})
-pdbbind = pdbbind[pdbbind['max_tanimoto_schrodinger'] < 0.9]
-pdbbind = pdbbind[pdbbind['max_tanimoto_merck'] < 0.9]
-pdbbind = pdbbind[['unique_id','pK','split']]
-
-bindingnet = pd.read_csv("data/bindingnet_processed.csv", index_col=0)
-bindingnet = bindingnet.rename(columns={'-logAffi': 'pK','unique_identify':'unique_id'})[['unique_id','pK','max_tanimoto_schrodinger','max_tanimoto_merck']]
-bindingnet['split'] = 'train'
-bindingnet = bindingnet[bindingnet['max_tanimoto_schrodinger'] < 0.9]
-bindingnet = bindingnet[bindingnet['max_tanimoto_merck'] < 0.9]
-bindingnet = bindingnet[['unique_id','pK','split']]
-
-# combine pdbbind2020 and bindingnet index sets
-data = pd.concat([pdbbind, bindingnet], ignore_index=True)
-print(data[['split']].value_counts())
+    args = parser.parse_args(args)
+    return args
 
 
-dataset = 'pdbbind_U_bindingnet_ligsim90'
+def parse_filter(filter_str):
+    """
+    Parse the filter string into column, operator, and value.
+    The filter string should be in the following format: <column> <operator> <value>.
+    For example: 'max_tanimoto_schrodinger < 0.9'.
 
-df = data[data['split'] == 'train']
-train_ids, train_y = list(df['unique_id']), list(df['pK'])
+    Parameters
+    ----------
+    filter_str : str
+        The filter string to parse.
+    
+    Returns
+    -------
+    column : str
+        The column name to filter on.
+    operator : str
+        The operator to use for filtering. Supported operators are: <, <=, >, >=, ==, !=.
+    value : str or float
+        The value to compare against. This will be converted to a float if possible.
+    """
+    # This regex will capture: column, operator, and value.
+    pattern = r'(\w+)\s*(<=|>=|==|!=|<|>)\s*(.+)'
+    match = re.match(pattern, filter_str)
+    if not match:
+        raise ValueError(
+            f"Filter '{filter_str}' is not in the correct format. "
+            f"Expected format: <column> <operator> <value>. "
+            f"Example: 'max_tanimoto_schrodinger < 0.9'."
+        )
+    column, operator, value = match.groups()
+    # Convert value to a float if possible, else keep as string
+    try:
+        value = float(value)
+    except ValueError:
+        pass
+    return column, operator, value
 
-df = data[data['split'] == 'valid']
-valid_ids, valid_y = list(df['unique_id']), list(df['pK'])
 
-df = data[data['split'] == 'test']
-test_ids, test_y = list(df['unique_id']), list(df['pK'])
+def apply_filter(df, column, operator, value):
+    """
+    Apply the filter to the DataFrame based on the column, operator, and value.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The DataFrame to filter.
+    column : str
+        The column name to filter on.
+    operator : str
+        The operator to use for filtering. Supported operators are: <, <=, >, >=, ==, !=.
+    value : str or float
+        The value to compare against. This will be converted to a float if possible.
+    
+    Returns
+    -------
+    pd.DataFrame
+        The filtered DataFrame.
+    """
+    if operator == '<':
+        return df[df[column] < value]
+    elif operator == '>':
+        return df[df[column] > value]
+    elif operator == '<=':
+        return df[df[column] <= value]
+    elif operator == '>=':
+        return df[df[column] >= value]
+    elif operator == '==':
+        return df[df[column] == value]
+    elif operator == '!=':
+        return df[df[column] != value]
+    else:
+        raise ValueError(f"Unsupported operator: {operator}")
 
-# make data PyTorch Geometric ready
-print('preparing ', dataset + '_train.pt in pytorch format!')
-train_data = GraphDataset(root='data', dataset=dataset + '_train', ids=train_ids, y=train_y, graphs_dict=graphs_dict)
 
-print('preparing ', dataset + '_valid.pt in pytorch format!')
-valid_data = GraphDataset(root='data', dataset=dataset + '_valid', ids=valid_ids, y=valid_y, graphs_dict=graphs_dict)
+def main():
+    t0 = time.time()
+    args = initialize(sys.argv[1:])
+    sys.stdout = utils.Logger(args.log)
+    sys.stderr = utils.Logger(args.log)
 
-print('preparing ', dataset + '_test.pt in pytorch format!')
-test_data = GraphDataset(root='data', dataset=dataset + '_test', ids=test_ids, y=test_y, graphs_dict=graphs_dict)
+    print(f"Version of aev_plig: {aev_plig.__version__}")
+    print(f"Command line: {' '.join(sys.argv)}")
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Current time: {datetime.datetime.now()}\n")
+
+    # 1. Load the pickled graphs
+    pickle_files = glob.glob(os.path.join(args.dir, "*.pkl")) + glob.glob(os.path.join(args.dir, "*.pickle"))
+    print(f"Pickled graphs found in {args.dir}: {pickle_files}")
+    print(f"Loading pickled graphs...")
+    graphs_dict = {}
+    for pickle_file in pickle_files:
+        with open(pickle_file, "rb") as f:
+            graphs = pickle.load(f)
+        graphs_dict.update(graphs)
+
+    # 2. Load the processed CSV files
+    print('Loading the processed CSV files...')
+    data_to_merge = []
+    for csv_file in args.csv_files:
+        print(f"Processing {csv_file}...")
+        csv_data = pd.read_csv(csv_file, index_col=0)
+        if args.filters:
+            for filter_str in args.filters:
+                column, operator, value = parse_filter(filter_str)
+                csv_data = apply_filter(csv_data, column, operator, value)
+        csv_data = csv_data[['system_id', 'pK', 'split']]
+        data_to_merge.append(csv_data)
+    data = pd.concat(data_to_merge, ignore_index=True)
+    print(data[['split']].value_counts())
+
+    # 3. Create PyTorch data
+    splits = ['train', 'valid', 'test']
+    for split in splits:
+        if split not in data['split'].unique():
+            print(f"Split '{split}' not found in the dataset. Skipping...")
+            continue
+        
+        print(f"Preparing {args.prefix}_{split}.pt ...")
+        df_split = data[data['split'] == split]
+        split_ids, split_y = list(df_split['system_id']), list(df_split['pK'])
+        split_data = utils.GraphDataset(root='data', dataset=f'{args.prefix}_{split}', ids=split_ids, y=split_y, graphs_dict=graphs_dict)

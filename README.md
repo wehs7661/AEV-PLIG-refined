@@ -1,16 +1,105 @@
-# AEV-PLIG
+# AEV-PLIG refined
 
 AEV-PLIG is a GNN-based scoring function that predicts the binding affinity of a bound protein-ligand complex given its 3D structure.
+
+This repo provides an implementation of the AEV-PLIG model modified from the original repo ([AEV-PLIG](https://github.com/isakvals/AEV-PLIG)) with a more user-friendly command-line interfaces (CLI) and a more organized codebase. For more details about the notable changes, please refer to [CHANGELOG.md](CHANGELOG.md).
 
 ## Installation
 We recommend using a conda environment to install the package.
 ```
 conda create --name aev-plig
-git clone https://github.com/wehs7661/AEV-PLIG.git
-cd AEV-PLIG
+git clone https://github.com/wehs7661/AEV-PLIG-refined.git
+cd AEV-PLIG-refined
 pip install .
 ```
 
+## Command-line interfaces (CLIs)
+The package provides several command-line interfaces (CLIs) to facilitate the streamlined data processing and model training.
+
+### CLI `process_dataset`
+Here is the help message for the CLI `process_dataset`:
+```
+usage: process_dataset [-h] -ds
+                       {pdbbind,hiqbind,bindingdb,bindingnet_v1,bindingnet_v2,neuralbind,fep_benchmarkcustom}
+                       -d DIR [-r REF] [-f FILTER] [-o OUTPUT] [-l LOG]
+
+This CLI processes an input dataset and returns a CSV file for graph generation.
+
+options:
+  -h, --help            show this help message and exit
+  -ds {pdbbind,hiqbind,bindingdb,bindingnet_v1,bindingnet_v2,neuralbind,fep_benchmarkcustom}, --dataset {pdbbind,hiqbind,bindingdb,bindingnet_v1,bindingnet_v2,neuralbind,fep_benchmarkcustom}
+                        The dataset to process. Options include pdbbind, bindingnet_v1,
+                        bindingnet_v2, bindingdb, neuralbind, fep_benchmark (FEP
+                        benchmark from Schrödinger), and custom (user-defined dataset).
+  -d DIR, --dir DIR     The root directory containing the dataset.
+  -r REF, --ref REF     The reference CSV file containing ligand paths (in the column
+                        'ligand_path') against which the maximum Tanimoto similarity is
+                        calculated for each ligand in the processed dataset.
+  -f FILTER, --filter FILTER
+                        The CSV file containing the system IDs (in the column
+                        'system_id') to be filtered out from the processed dataset.
+  -o OUTPUT, --output OUTPUT
+                        The output CSV file. The default is processed_[dataset].csv where
+                        [dataset] is the dataset name.
+  -l LOG, --log LOG     The path to the log file. Default is process_dataset.log.
+  ```
+
+### CLI `generate_graphs`
+Here is the help message for the CLI `generate_graphs`:
+```
+(aev-plig) bioc1870@ran-01:~/AEV_PLIG_training/HiQBind_full$ generate_graphs -h
+/home/bioc1870/Software/mambaforge/envs/aev-plig/lib/python3.12/site-packages/torchani/aev.py:16: UserWarning: cuaev not installed
+  warnings.warn("cuaev not installed")
+/home/bioc1870/Software/GitHub_packages/AEV-PLIG-refined/torchani_mod/aev.py:18: UserWarning: cuaev not installed
+  warnings.warn("cuaev not installed")
+usage: generate_graphs [-h] -c CSV [-o OUTPUT] [-l LOG]
+
+This CLI generates graphs for the input dataset.
+
+options:
+  -h, --help            show this help message and exit
+  -c CSV, --csv CSV     The path to the input processed CSV file. The CSV file should at
+                        least have columns including 'system_id', 'protein_path', and
+                        'ligand_path'.
+  -o OUTPUT, --output OUTPUT
+                        The path to the output pickle file for the generated graphs. Default is graphs.pickle.
+  -l LOG, --log LOG     The path to the log file. Default is generate_graphs.log.
+```
+
+### CLI `create_pytorch_data`
+Here is the help message for the CLI `create_pytorch_data`:
+```
+usage: create_pytorch_data [-h] -d DIR -c CSV_FILES [CSV_FILES ...]
+                           [-f FILTERS [FILTERS ...]] [-p PREFIX] [-o OUTPUT] [-l LOG]
+
+This CLI process pickled graphs and create PyTorch data ready for training.
+
+options:
+  -h, --help            show this help message and exit
+  -d DIR, --dir DIR     The directory containing the pickled graphs.
+  -c CSV_FILES [CSV_FILES ...], --csv_files CSV_FILES [CSV_FILES ...]
+                        The paths to the input processed CSV files, each corresponding
+                        to a pickled graph. Each CSV file should at least have columns
+                        including 'system_id', 'protein_path', 'ligand_path', 'pK', and
+                        'split'.
+  -f FILTERS [FILTERS ...], --filters FILTERS [FILTERS ...]
+                        The filters to apply to the dataset. The filters are in the
+                        format of 'column_name operator value'. For example,
+                        'max_tanimoto_schrodinger < 0.9' will filter out entries with
+                        maximum Tanimoto similarity to Schrodinger dataset less than
+                        0.9. The operators include '<', '<=', '>', '>=', '==', and '!='.
+  -p PREFIX, --prefix PREFIX
+                        The prefix of the output PyTorch files. Default is 'dataset'.
+  -o OUTPUT, --output OUTPUT
+                        The output directory. Default is the same as the input
+                        directory.
+  -l LOG, --log LOG     The path to the log file. Default is create_pytorch_data.log.
+```
+
+## Usage
+To be added.
+
+---
 ## Reproducing the results from the paper
 In this section, we elaborate necessary steps to reproduce the results from the paper.
 
