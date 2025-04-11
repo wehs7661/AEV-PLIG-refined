@@ -19,21 +19,22 @@ from aev_plig.utils import Logger
 
 def initialize(args):
     parser = argparse.ArgumentParser(
-        description='Generate graphs for the training set.'
+        description='This CLI generates graphs for the input dataset.'
     )
     parser.add_argument(
         "-c",
         "--csv",
         type=str,
         required=True,
-        help="The path to the input processed CSV file."
+        help="The path to the input processed CSV file. The CSV file should at least have columns including 'system_id',\
+            'protein_path', and 'ligand_path'."
     )
     parser.add_argument(
         "-o",
         "--output",
         type=str,
         default="graphs.pickle",
-        help="The path to the output pickle file for the generated graphs."
+        help="The path to the output pickle file for the generated graphs. Default is graphs.pickle."
     )
     parser.add_argument(
         "-l",
@@ -428,7 +429,7 @@ def main():
         elif ligand_ftype == "sdf":
             mol = Chem.SDMolSupplier(ligand_path, removeHs=False)[0]
         else:
-            print("Unknown file format:", ligand_path)
+            print(f"The ligand file type {ligand_ftype} is not supported. Only mol2 and sdf are supported.")
             continue
 
         if mol is None:
