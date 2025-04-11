@@ -474,9 +474,12 @@ def main():
     torch.set_num_threads(1)  # This is necessary or the parallelization would not help.
     pool_input = [(index, row, atom_keys, atom_map, radial_coefs) for index, row in data.iterrows()]
     with Pool(initializer=lambda: os.sched_setaffinity(0, set(range(cpu_count())))) as pool:
-        results = list(pool.imap(process_row, pool_input))
-
-        for system_id, graph, failed, failed_after_reading_flag in results:
+        for system_id, graph, failed, failed_after_reading_flag in tqdm(
+            pool.imap(process_row, pool_input),
+            total=len(data),
+            file=sys.__stderr__,
+            desc="Generating graphs",
+        ):
             if failed:
                 failed_list.append(system_id)
             elif failed_after_reading_flag:
