@@ -47,11 +47,6 @@ options:
 ### CLI `generate_graphs`
 Here is the help message for the CLI `generate_graphs`:
 ```
-(aev-plig) bioc1870@ran-01:~/AEV_PLIG_training/HiQBind_full$ generate_graphs -h
-/home/bioc1870/Software/mambaforge/envs/aev-plig/lib/python3.12/site-packages/torchani/aev.py:16: UserWarning: cuaev not installed
-  warnings.warn("cuaev not installed")
-/home/bioc1870/Software/GitHub_packages/AEV-PLIG-refined/torchani_mod/aev.py:18: UserWarning: cuaev not installed
-  warnings.warn("cuaev not installed")
 usage: generate_graphs [-h] -c CSV [-o OUTPUT] [-l LOG]
 
 This CLI generates graphs for the input dataset.
