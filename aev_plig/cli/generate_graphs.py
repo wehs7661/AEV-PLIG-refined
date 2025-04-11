@@ -34,7 +34,7 @@ def initialize(args):
         "--output",
         type=str,
         default="graphs.pickle",
-        help="The path to the output pickle file for the generated graphs."
+        help="The path to the output pickle file for the generated graphs. Default is graphs.pickle."
     )
     parser.add_argument(
         "-l",
