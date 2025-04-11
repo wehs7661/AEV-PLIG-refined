@@ -27,7 +27,6 @@ def generate_fingerprint(sdf_file):
     if lig is None:
         print(f"Warning: RDKit returned None for {sdf_file}. Skipping ...")
         return None
-    fp_gen = GetMorganGenerator(radius=3)
     fingerprint = fp_gen.GetSparseCountFingerprint(lig)
     return fingerprint
 
