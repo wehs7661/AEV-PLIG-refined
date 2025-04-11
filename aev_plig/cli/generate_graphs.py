@@ -15,6 +15,7 @@ from tqdm import tqdm
 from rdkit import Chem
 from aev_plig.data import data_dir
 from aev_plig.utils import Logger
+from multiprocessing import Pool, cpu_count
 
 
 def initialize(args):
@@ -386,6 +387,57 @@ def mol_to_graph(mol, mol_df, aevs, extra_features=["atom_symbol",
     return len(mol_df), features, edge_index, edge_attr
 
 
+def process_row(args):
+    """
+    Process a single row of the DataFrame to generate a graph for the protein-ligand complex.
+    
+    Parameters
+    ----------
+    args: tuple
+        Contains (index, row, atom_keys, atom_map, radial_coefs) where row is a Series from the DataFrame.
+    
+    Returns
+    -------
+    tuple
+        (system_id, graph, failed, failed_after_reading, log_messages)
+        - system_id: The identifier for the complex.
+        - graph: The computed graph or None if failed.
+        - failed: True if molecule loading failed, else False.
+        - failed_after_reading: True if AEV/graph computation failed, else False.
+    """
+    index, row, atom_keys, atom_map, radial_coefs = args
+    
+    system_id = row["system_id"]
+    protein_path = row["protein_path"]
+    ligand_path = row["ligand_path"]
+    ligand_ftype = ligand_path.split(".")[-1]
+    
+    # Load ligand
+    if ligand_ftype == "mol2":
+        mol = Chem.MolFromMol2File(ligand_path)
+    elif ligand_ftype == "sdf":
+        mol = Chem.SDMolSupplier(ligand_path, removeHs=False)[0]
+    else:
+        print(f"The ligand file type {ligand_ftype} is not supported for system {system_id}. Only mol2 and sdf are supported.")
+        return system_id, None, True, False
+    
+    if mol is None:
+        print(f"Can't read molecule structure: {system_id}")
+        return system_id, None, True, False
+    else:
+        if ligand_ftype == "mol2":
+            mol = Chem.AddHs(mol, addCoords=True)
+    
+    # Compute AEVs and graph
+    try:
+        mol_df, aevs = GetMolAEVs_extended(protein_path, mol, atom_keys, radial_coefs, atom_map)
+        graph = mol_to_graph(mol, mol_df, aevs)
+        return system_id, graph, False, False
+    except ValueError as e:
+        print(f"ValueError in system {system_id}: {str(e)}")
+        return system_id, None, False, True
+
+
 def main():
     t0 = time.time()
     args = initialize(sys.argv[1:])
@@ -400,7 +452,7 @@ def main():
     # Step 1. Load data
     data = pd.read_csv(args.csv)
     print(f"Generating graphs for the training set {args.csv} ...")
-    print("The number of data points is ", len(data))
+    print(f"The number of data points: {len(data)}")
 
     # Step 2. Generate for all complexes: ANI-2x with 22 atom types. Only 2-atom interactions
     atom_keys = pd.read_csv(os.path.join(data_dir, "PDB_Atom_Keys.csv"), sep=",")
@@ -419,35 +471,18 @@ def main():
     failed_list = []
     failed_after_reading = []
 
-    for index, row in tqdm(data.iterrows(), file=sys.__stderr__):
-        system_id = row["system_id"]
-        protein_path = row["protein_path"]
-        ligand_path = row["ligand_path"]
-        ligand_ftype = ligand_path.split(".")[-1]
-        if ligand_ftype == "mol2":
-            mol = Chem.MolFromMol2File(ligand_path)
-        elif ligand_ftype == "sdf":
-            mol = Chem.SDMolSupplier(ligand_path, removeHs=False)[0]
-        else:
-            print(f"The ligand file type {ligand_ftype} is not supported. Only mol2 and sdf are supported.")
-            continue
+    torch.set_num_threads(1)  # This is necessary or the parallelization would not help.
+    pool_input = [(index, row, atom_keys, atom_map, radial_coefs) for index, row in data.iterrows()]
+    with Pool(initializer=lambda: os.sched_setaffinity(0, set(range(cpu_count())))) as pool:
+        results = list(pool.imap(process_row, pool_input))
 
-        if mol is None:
-            print("can't read molecule structure:", system_id)
-            failed_list.append(system_id)
-            continue
-        else:
-            if ligand_ftype == "mol2":
-                mol = Chem.AddHs(mol, addCoords=True)
-        
-        try:
-            mol_df, aevs = GetMolAEVs_extended(protein_path, mol, atom_keys, radial_coefs, atom_map)
-            graph = mol_to_graph(mol, mol_df, aevs)
-            mol_graphs[system_id] = graph
-        except ValueError as e:
-            print(e)
-            failed_after_reading.append(system_id)
-            continue
+        for system_id, graph, failed, failed_after_reading_flag in results:
+            if failed:
+                failed_list.append(system_id)
+            elif failed_after_reading_flag:
+                failed_after_reading.append(system_id)
+            else:
+                mol_graphs[system_id] = graph
 
     print("Number of failed molecules:", len(failed_list))
     print("Number of failed after reading:", len(failed_after_reading))
