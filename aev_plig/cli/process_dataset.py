@@ -536,10 +536,12 @@ def main():
         df = df[~df["system_id"].isin(filter_ids)]
 
     if args.ref:
-        print(f"Calculating maximum Tanimoto similarity to reference dataset {args.ref} ...")
+        print(f"Generating fingerprints for all ligands in {args.ref} and {args.dataset} ...")
         df_ref = pd.read_csv(args.ref)
-        fps_ref, _ = calc_metrics.generate_fingerprints(df_ref, "ligand_path")
-        fps, valid_indices = calc_metrics.generate_fingerprints(df, "ligand_path")
+        fps_ref, _ = calc_metrics.generate_fingerprints_parallelized(df_ref, "ligand_path")
+        fps, valid_indices = calc_metrics.generate_fingerprints_parallelized(df, "ligand_path")
+        
+        print(f"Calculating maximum Tanimoto similarity to {args.ref} for each ligand in {args.dataset} ...")
         max_sims = calc_metrics.calc_max_tanimoto_similarity(fps, fps_ref)
         df['max_tanimoto_ref'] = np.nan
         df.loc[valid_indices, 'max_tanimoto_ref'] = max_sims
