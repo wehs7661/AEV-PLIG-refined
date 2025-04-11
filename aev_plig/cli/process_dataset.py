@@ -541,11 +541,11 @@ def main():
         fps_ref, _ = calc_metrics.generate_fingerprints_parallelized(df_ref, "ligand_path")
         fps, valid_indices = calc_metrics.generate_fingerprints_parallelized(df, "ligand_path")
         
-        print(f"Calculating maximum Tanimoto similarity to {args.ref} for each ligand in {args.dataset} ...")
+        print(f"\nCalculating maximum Tanimoto similarity to {args.ref} for each ligand in {args.dataset} ...")
         max_sims = calc_metrics.calc_max_tanimoto_similarity(fps, fps_ref)
         df['max_tanimoto_ref'] = np.nan
         df.loc[valid_indices, 'max_tanimoto_ref'] = max_sims
     
     df.to_csv(args.output, index=False)
-    print(f"Processed dataset saved to {args.output}")
+    print(f"\nProcessed dataset saved to {args.output}")
     print(f"Elapsed time: {time.time() - t0:.2f} seconds")
