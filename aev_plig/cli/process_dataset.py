@@ -8,7 +8,7 @@ import datetime
 import numpy as np
 import pandas as pd
 import aev_plig
-from aev_plig.utils import Logger
+from aev_plig import utils, calc_metrics
 from abc import ABC, abstractmethod
 
 def initialize(args):
@@ -20,8 +20,18 @@ def initialize(args):
         "--dataset",
         type=str,
         required=True,
-        choices=["pdbbind", "hiqbind", "bindingdb", "bindingnet_v1", "bindingnet_v2", "neuralbind"],
-        help="The dataset to process. Options include pdbbind, bindingnet1, bindingnet2, bindingdb, and neuralbind."
+        choices=[
+            "pdbbind",
+            "hiqbind",
+            "bindingdb",
+            "bindingnet_v1",
+            "bindingnet_v2",
+            "neuralbind",
+            "fep_benchmark"
+            "custom"
+        ],
+        help="The dataset to process. Options include pdbbind, bindingnet_v1, bindingnet_v2, bindingdb, neuralbind,\
+            fep_benchmark (FEP benchmark from Schrödinger), and custom (user-defined dataset)."
     )
     parser.add_argument(
         "-d",
@@ -29,6 +39,20 @@ def initialize(args):
         type=str,
         required=True,
         help="The root directory containing the dataset."
+    )
+    parser.add_argument(
+        "-r",
+        "--ref",
+        type=str,
+        help="The reference CSV file containing ligand paths (in the column 'ligand_path') against which \
+            the maximum Tanimoto similarity is calculated for each ligand in the processed dataset."
+    )
+    parser.add_argument(
+        "-f",
+        "--filter",
+        type=str,
+        help="The CSV file containing the system IDs (in the column 'system_id') to be filtered out from the\
+        processed dataset."
     )
     parser.add_argument(
         "-o",
@@ -385,6 +409,7 @@ class NeuralBindCollector(DatasetCollector):
     """
     Collector for NeuralBind dataset.
     """
+
     def collect(self):
         """
         Collect entries from the NeuralBind dataset. (placeholder)
@@ -401,6 +426,7 @@ class CustomDatasetCollector(DatasetCollector):
     """
     Collector for a user-defined custom dataset.
     """
+
     def __init__(self, base_dir, config):
         """
         Initializes the CustomDatasetCollector with a base directory and configuration.
@@ -491,16 +517,33 @@ def collect_entries(base_dir, dataset, config=None):
 def main():
     t0 = time.time()
     args = initialize(sys.argv[1:])
-    sys.stdout = Logger(args.log)
-    sys.stderr = Logger(args.log)
+    sys.stdout = utils.Logger(args.log)
+    sys.stderr = utils.Logger(args.log)
 
     print(f"Version of aev_plig: {aev_plig.__version__}")
     print(f"Command line: {' '.join(sys.argv)}")
     print(f"Current working directory: {os.getcwd()}")
     print(f"Current time: {datetime.datetime.now()}\n")
 
-    print(f"Processing {args.dataset} ...")
+    print(f"Processing {args.dataset} ...\n")
     args.output = f"processed_{args.dataset}.csv" if args.output is None else args.output
     df = collect_entries(args.dir, args.dataset)
+    
+    if args.filter:
+        print(f"Filtering out entries present in {args.filter} ...")
+        filter_df = pd.read_csv(args.filter)
+        filter_ids = filter_df["system_id"].tolist()
+        df = df[~df["system_id"].isin(filter_ids)]
+
+    if args.ref:
+        print(f"Calculating maximum Tanimoto similarity to reference dataset {args.ref} ...")
+        df_ref = pd.read_csv(args.ref)
+        fps_ref, _ = calc_metrics.generate_fingerprints(df_ref, "ligand_path")
+        fps, valid_indices = calc_metrics.generate_fingerprints(df, "ligand_path")
+        max_sims = calc_metrics.calc_max_tanimoto_similarity(fps, fps_ref)
+        df['max_tanimoto_ref'] = np.nan
+        df.loc[valid_indices, 'max_tanimoto_ref'] = max_sims
+    
     df.to_csv(args.output, index=False)
+    print(f"Processed dataset saved to {args.output}")
     print(f"Elapsed time: {time.time() - t0:.2f} seconds")
