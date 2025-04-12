@@ -5,9 +5,10 @@ import glob
 import natsort
 import argparse
 import datetime
+import aev_plig
 import numpy as np
 import pandas as pd
-import aev_plig
+from tqdm import tqdm
 from aev_plig import utils, calc_metrics
 from abc import ABC, abstractmethod
 
@@ -41,18 +42,43 @@ def initialize(args):
         help="The root directory containing the dataset."
     )
     parser.add_argument(
-        "-r",
-        "--ref",
+        "-cr",
+        "--csv_ref",
         type=str,
         help="The reference CSV file containing ligand paths (in the column 'ligand_path') against which \
             the maximum Tanimoto similarity is calculated for each ligand in the processed dataset."
     )
     parser.add_argument(
-        "-f",
-        "--filter",
+        "-cf",
+        "--csv_filter",
         type=str,
         help="The CSV file containing the system IDs (in the column 'system_id') to be filtered out from the\
         processed dataset."
+    )
+    parser.add_argument(
+        "-s",
+        "--split",
+        type=float,
+        nargs=3,
+        default=None,
+        help="The split ratio for train, validation, and test sets. Default is None, in which case the dataset\
+            will not be split."
+    )
+    parser.add_argument(
+        "-sc",
+        "--similarity_cutoff",
+        type=float,
+        default=1.0,
+        help="The cutoff value for maximum Tanimoto similarity. Default is 1.0. A value of x means that only ligands\
+            with maximum Tanimoto similarity less than x will be considered for splitting. This option is only\
+            valid when the flag '-s'/'--split' is specified."
+    )
+    parser.add_argument(
+        "-rs",
+        "--random_seed",
+        type=int,
+        default=None,
+        help="The random seed for splitting the dataset. Default is None, in which case no random seed is used."
     )
     parser.add_argument(
         "-o",
@@ -143,7 +169,7 @@ class PDBBindCollector(DatasetCollector):
         # 2. Collect file paths
         for subset_dir in ["refined-set", "v2020-other-PL"]:
             dirs = natsort.natsorted(glob.glob(os.path.join(self.base_dir, f'{subset_dir}/*')))
-            for dir_path in dirs:
+            for dir_path in tqdm(dirs, desc=f"Collecting {subset_dir} entries", file=sys.__stderr__):
                 base_name = os.path.basename(dir_path)
                 if base_name in ["index", "readme"]:
                     continue
@@ -204,7 +230,7 @@ class HiQBindCollector(DatasetCollector):
         df_index = self._load_hiqbind_metadata()
 
         # 2. Collect file paths
-        for _, row in df_index.iterrows():
+        for _, row in tqdm(df_index.iterrows(), desc="Collecting HiQBind entries", file=sys.__stderr__):
             pdb_id = row["PDBID"]
             ligand_name = row["Ligand Name"]
             ligand_chain = row["Ligand Chain"]
@@ -262,7 +288,7 @@ class BindingDBCollector(DatasetCollector):
             A DataFrame with system_id, pK, protein_path, and ligand_path for HiQBind entries.
         """
         target_dirs = [d for d in natsort.natsorted(glob.glob(os.path.join(self.base_dir, "*"))) if os.path.isdir(d)]
-        for target_dir in target_dirs:
+        for target_dir in tqdm(target_dirs, desc="Collecting BindingDB entries", file=sys.__stderr__):
             pdb_id = os.path.basename(target_dir).split('_')[0]
             csv_file = os.path.join(target_dir, f'{pdb_id}.csv')
             if not os.path.exists(csv_file):  # Some entries in BindingDB do not have a .csv file
@@ -343,7 +369,7 @@ class BindingNetV1Collector(DatasetCollector):
         binding_dict = dict(zip(df["unique_identify"], df["-logAffi"]))
         
         # 2. Collect file paths
-        for system_id in system_ids:
+        for system_id in tqdm(system_ids, desc="Collecting BindingNet v1 entries", file=sys.__stderr__):
             target_chembl, pdb_id, ligand_chembl = system_id.split("_")
             protein_path = os.path.join(self.base_dir, "from_chembl_client", pdb_id, "rec_h_opt.pdb")
             ligand_path = os.path.join(
@@ -388,7 +414,7 @@ class BindingNetV2Collector(DatasetCollector):
         binding_dict = dict(zip(df['system_id'], df['-logAffi']))
         
         # 2. Collect file paths
-        for _, row in df.iterrows():
+        for _, row in tqdm(df.iterrows(), desc="Collecting BindingNet v2 entries", file=sys.__stderr__):
             system_id = row['system_id']
             pK = binding_dict.get(system_id)
             subset = row['subset']
@@ -514,6 +540,60 @@ def collect_entries(base_dir, dataset, config=None):
     return df
 
 
+def split_dataset(df, split_ratio, random_seed=None):
+    """
+    Split the given dataset into train, validation, and test splits.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The dataset to be split.
+    split_ratio : tuple
+        A tuple of floats specifying the proportions for train, validation, and test splits.
+        For example, (0.9, 0.1, 0) means 90% for train, 10% for validation, and 0% for test.
+        The input tuple must have 3 elements.
+    random_seed : int
+        The random seed for reproducibility. Default is None, meaning that no seed is set.
+
+    Returns 
+    -------
+    df : pandas.DataFrame
+        The original DataFrame with an additional "split" column indicating the split.
+    """
+    df = df.copy()  # avoid modifying the original DataFrame
+    if 'split' not in df.columns:
+        df['split'] = ''
+
+    if random_seed is not None:
+        np.random.seed(random_seed)
+
+    if len(split_ratio) != 3:
+        raise ValueError("The parameter 'split_ratio' must have 3 elements.")
+    ratios = [r/sum(split_ratio) for r in split_ratio]
+
+    unassigned_mask = df['split'] == ''
+    unassigned_indices = df[unassigned_mask].index
+
+    n_unassigned = len(unassigned_indices)
+    n_train = 0 if ratios[0] == 0 else int(n_unassigned * ratios[0])
+    n_val = 0 if ratios[1] == 0 else int(n_unassigned * ratios[1])
+    n_test = 0 if ratios[2] == 0 else n_unassigned - n_train - n_val
+    if n_unassigned != n_train + n_val + n_test:
+        # Put the remaining entries into the training set (the training ratio probably would not be 0 anyway)
+        n_train = n_unassigned - n_test - n_val
+    assert n_train + n_val + n_test == n_unassigned
+
+    shuffled_indices = np.random.permutation(unassigned_indices)
+    df.loc[shuffled_indices[:n_train], 'split'] = 'train'
+    df.loc[shuffled_indices[n_train:n_train + n_val], 'split'] = 'validation'
+    df.loc[shuffled_indices[n_train + n_val:], 'split'] = 'test'
+
+    # Assert that all rows has a value for the 'split' column
+    assert df['split'].notna().all()
+
+    return df
+
+
 def main():
     t0 = time.time()
     args = initialize(sys.argv[1:])
@@ -529,23 +609,37 @@ def main():
     args.output = f"processed_{args.dataset}.csv" if args.output is None else args.output
     df = collect_entries(args.dir, args.dataset)
     
-    if args.filter:
-        print(f"Filtering out entries present in {args.filter} ...")
-        filter_df = pd.read_csv(args.filter)
+    if args.csv_filter:
+        print(f"Filtering out entries present in {args.csv_filter} ...")
+        filter_df = pd.read_csv(args.csv_filter)
         filter_ids = filter_df["system_id"].tolist()
         df = df[~df["system_id"].isin(filter_ids)]
 
-    if args.ref:
-        print(f"Generating fingerprints for all ligands in {args.ref} and {args.dataset} ...")
-        df_ref = pd.read_csv(args.ref)
+    if args.csv_ref:
+        print(f"Generating fingerprints for all ligands in {args.csv_ref} and {args.dataset} ...")
+        df_ref = pd.read_csv(args.csv_ref)
         fps_ref, _ = calc_metrics.generate_fingerprints_parallelized(df_ref, "ligand_path")
         fps, valid_indices = calc_metrics.generate_fingerprints_parallelized(df, "ligand_path")
         
-        print(f"\nCalculating maximum Tanimoto similarity to {args.ref} for each ligand in {args.dataset} ...")
+        print(f"\nCalculating maximum Tanimoto similarity to {os.path.basename(args.csv_ref)} for each ligand in {args.dataset} ...")
         max_sims = calc_metrics.calc_max_tanimoto_similarity(fps, fps_ref)
         df['max_tanimoto_ref'] = np.nan
         df.loc[valid_indices, 'max_tanimoto_ref'] = max_sims
     
+    if args.split is not None:
+        df['split'] = ''
+
+        if args.similarity_cutoff < 1.0:
+            print(f"Filtering out ligands with maximum Tanimoto similarity >= {args.similarity_cutoff} ...")
+            df.loc[df['max_tanimoto_ref'] > args.similarity_cutoff, 'split'] = 'others'
+    
+        print(f"Splitting the dataset ...")
+        df = split_dataset(df, args.split, random_seed=args.random_seed)
+        print('  - Number of train entries:', len(df[df['split'] == 'train']))
+        print('  - Number of validation entries:', len(df[df['split'] == 'validation']))
+        print('  - Number of test entries:', len(df[df['split'] == 'test']))
+        print('  - Number of other entries:', len(df[df['split'] == 'others']))
+
     df.to_csv(args.output, index=False)
     print(f"\nProcessed dataset saved to {args.output}")
-    print(f"Elapsed time: {time.time() - t0:.2f} seconds")
+    print(f"Elapsed time: {utils.format_time(time.time() - t0)}")
