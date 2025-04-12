@@ -1,6 +1,8 @@
 import os
+import sys
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from rdkit import Chem
 from rdkit.DataStructs import BulkTanimotoSimilarity
 from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
@@ -51,7 +53,10 @@ def generate_fingerprints_parallelized(df, col_name):
     """
     sdf_paths = df[col_name].tolist()
     with Pool(initializer=lambda: os.sched_setaffinity(0, set(range(cpu_count())))) as pool:
-        results = list(pool.imap(generate_fingerprint, sdf_paths))
+        results = list(tqdm(pool.imap(generate_fingerprint, sdf_paths),
+                            total=len(sdf_paths),
+                            file=sys.__stderr__,
+                            desc="Generating fingerprints"))
     fingerprints, valid_indices = [], []
     for index, fingerprint in enumerate(results):
         if fingerprint is not None:
@@ -79,7 +84,7 @@ def calc_max_tanimoto_similarity(fps1, fps2):
         fingerprint in the first set.
     """
     max_similarities = []
-    for i in range(len(fps1)):
+    for i in tqdm(range(len(fps1)), file=sys.__stderr__, desc="Calculating Tanimoto similarities"):
         max_similarities.append(BulkTanimotoSimilarity(fps1[i], fps2))
     max_similarities = np.array(max_similarities)
     max_similarities = max_similarities.max(axis=1)
