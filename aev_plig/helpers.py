@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from math import sqrt
 from scipy import stats
-from model_defs import GATv2Net
+from aev_plig.model import GATv2Net
 
 model_dict = {"GATv2Net": GATv2Net}
 
