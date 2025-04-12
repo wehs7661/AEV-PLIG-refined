@@ -1,5 +1,6 @@
 import os
 import sys
+import datetime
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import numpy as np
@@ -175,3 +176,37 @@ class Logger:
         """
         # self.terminal.log()
         pass
+
+def format_time(t):
+    """
+    Converts time in seconds to a more readable format.
+
+    Parameters
+    ----------
+    t : float
+        The time in seconds.
+
+    Returns
+    -------
+    t_str : str
+        A string representing the time duration in a format of "X hour(s) Y minute(s) Z second(s)", adjusting the units
+        as necessary based on the input duration, e.g., 1 hour(s) 0 minute(s) 0 second(s) for 3600 seconds and
+        15 minute(s) 30 second(s) for 930 seconds.
+    """
+    hh_mm_ss = str(datetime.timedelta(seconds=t)).split(":")
+
+    if "day" in hh_mm_ss[0]:
+        # hh_mm_ss[0] will contain "day" and cannot be converted to float
+        hh, mm, ss = hh_mm_ss[0], float(hh_mm_ss[1]), float(hh_mm_ss[2])
+        t_str = f"{hh} hour(s) {mm:.0f} minute(s) {ss:.0f} second(s)"
+    else:
+        hh, mm, ss = float(hh_mm_ss[0]), float(hh_mm_ss[1]), float(hh_mm_ss[2])
+        if hh == 0:
+            if mm == 0:
+                t_str = f"{ss:.1f} second(s)"
+            else:
+                t_str = f"{mm:.0f} minute(s) {ss:.0f} second(s)"
+        else:
+            t_str = f"{hh:.0f} hour(s) {mm:.0f} minute(s) {ss:.0f} second(s)"
+
+    return t_str
