@@ -60,9 +60,8 @@ def initialize(args):
         "--split",
         type=float,
         nargs=3,
-        default=None,
-        help="The split ratio for train, validation, and test sets. Default is None, in which case the dataset\
-            will not be split."
+        default=[0.8, 0.1, 0.1],
+        help="The split ratio for train, validation, and test sets. Default is [0.8, 0.1, 0.1]."
     )
     parser.add_argument(
         "-sc",
@@ -626,19 +625,19 @@ def main():
         df['max_tanimoto_ref'] = np.nan
         df.loc[valid_indices, 'max_tanimoto_ref'] = max_sims
     
-    if args.split is not None:
-        df['split'] = ''
+    df['split'] = ''
+    df.loc[df.isna().any(axis=1), 'split'] = 'others'
+    # print(df[df['split'] == 'others'])
+    if args.similarity_cutoff < 1.0:
+        print(f"Filtering out ligands with maximum Tanimoto similarity >= {args.similarity_cutoff} ...")
+        df.loc[df['max_tanimoto_ref'] > args.similarity_cutoff, 'split'] = 'others'
 
-        if args.similarity_cutoff < 1.0:
-            print(f"Filtering out ligands with maximum Tanimoto similarity >= {args.similarity_cutoff} ...")
-            df.loc[df['max_tanimoto_ref'] > args.similarity_cutoff, 'split'] = 'others'
-    
-        print(f"Splitting the dataset ...")
-        df = split_dataset(df, args.split, random_seed=args.random_seed)
-        print('  - Number of train entries:', len(df[df['split'] == 'train']))
-        print('  - Number of validation entries:', len(df[df['split'] == 'validation']))
-        print('  - Number of test entries:', len(df[df['split'] == 'test']))
-        print('  - Number of other entries:', len(df[df['split'] == 'others']))
+    print(f"Splitting the dataset ...")
+    df = split_dataset(df, args.split, random_seed=args.random_seed)
+    print('  - Number of train entries:', len(df[df['split'] == 'train']))
+    print('  - Number of validation entries:', len(df[df['split'] == 'validation']))
+    print('  - Number of test entries:', len(df[df['split'] == 'test']))
+    print('  - Number of other entries:', len(df[df['split'] == 'others']))
 
     df.to_csv(args.output, index=False)
     print(f"\nProcessed dataset saved to {args.output}")
