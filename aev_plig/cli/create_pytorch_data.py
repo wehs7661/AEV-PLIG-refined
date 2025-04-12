@@ -153,7 +153,7 @@ def main():
     # 1. Load the pickled graphs
     pickle_files = glob.glob(os.path.join(args.dir, "*.pkl")) + glob.glob(os.path.join(args.dir, "*.pickle"))
     print(f"Pickled graphs found in {args.dir}: {pickle_files}")
-    print(f"Loading pickled graphs...")
+    print(f"Loading pickled graphs ...")
     graphs_dict = {}
     for pickle_file in pickle_files:
         with open(pickle_file, "rb") as f:
@@ -161,28 +161,32 @@ def main():
         graphs_dict.update(graphs)
 
     # 2. Load the processed CSV files
-    print('Loading the processed CSV files...')
     data_to_merge = []
     for csv_file in args.csv_files:
         print(f"Processing {csv_file}...")
-        csv_data = pd.read_csv(csv_file, index_col=0)
+        csv_data = pd.read_csv(csv_file)
         if args.filters:
             for filter_str in args.filters:
                 column, operator, value = parse_filter(filter_str)
                 csv_data = apply_filter(csv_data, column, operator, value)
         csv_data = csv_data[['system_id', 'pK', 'split']]
+        
         data_to_merge.append(csv_data)
     data = pd.concat(data_to_merge, ignore_index=True)
-    print(data[['split']].value_counts())
+    print(f'\nNumber of training entries: {len(data[data["split"] == "train"])}')
+    print(f'Number of validation entries: {len(data[data["split"] == "validation"])}')
+    print(f'Number of test entries: {len(data[data["split"] == "test"])}')
+    print(f'Number of other entries: {len(data[data["split"] != "others"])}\n')
 
     # 3. Create PyTorch data
-    splits = ['train', 'valid', 'test']
+    splits = ['train', 'validation', 'test']
     for split in splits:
         if split not in data['split'].unique():
-            print(f"Split '{split}' not found in the dataset. Skipping...")
+            print(f"\nSplit '{split}' not found in the dataset. Skipping ...")
             continue
         
-        print(f"Preparing {args.prefix}_{split}.pt ...")
         df_split = data[data['split'] == split]
         split_ids, split_y = list(df_split['system_id']), list(df_split['pK'])
         split_data = utils.GraphDataset(root='data', dataset=f'{args.prefix}_{split}', ids=split_ids, y=split_y, graphs_dict=graphs_dict)
+
+    print(f"\nElapsed time: {utils.format_time(time.time() - t0)}")

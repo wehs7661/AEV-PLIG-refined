@@ -26,8 +26,7 @@ class GraphDataset(InMemoryDataset):
         if os.path.isfile(self.processed_paths[0]):
             #self.data, self.slices = torch.load(self.processed_paths[0])
             self.load(self.processed_paths[0])
-            print("processed paths:")
-            print(self.processed_paths[0])
+            print(f'Preparing {self.processed_paths[0]} ...')
 
         else:
             self.process(ids, y, graphs_dict)
