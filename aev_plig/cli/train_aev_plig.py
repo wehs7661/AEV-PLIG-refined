@@ -10,6 +10,7 @@ import aev_plig
 import numpy as np
 import pandas as pd
 import torch.nn as nn
+from tqdm import tqdm
 from torch_geometric.loader import DataLoader
 from aev_plig import utils
 from aev_plig.helpers import rmse, pearson, model_dict
@@ -80,22 +81,69 @@ def initialize(args):
     return args
 
 def predict(model, device, loader, y_scaler=None):
+    """
+    Make predictions on the given dataset
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The model to use for prediction.
+    device : torch.device
+        The device to use for prediction, e.g. 'cpu' or 'cuda'.
+    loader : torch.utils.data.DataLoader
+        The data loader for the dataset.
+    y_scaler : sklearn.preprocessing.StandardScaler
+        The scaler to inverse-transform predictions.
+
+    Returns
+    -------
+    y_true : numpy.ndarray
+        The ground truth labels.
+    y_pred : numpy.ndarray
+        The predicted labels.
+    """
     model.eval()
     total_preds = torch.Tensor()
     total_labels = torch.Tensor()
-    # print(f'Make prediction for {len(loader.dataset)} samples...')
+    print(f'Make prediction for {len(loader.dataset)} samples...')
     with torch.no_grad():
         for data in loader:
+            # Iterate over batches of data from loader
             data = data.to(device)
             output = model(data)
             total_preds = torch.cat((total_preds, output.cpu()), 0)
             total_labels = torch.cat((total_labels, data.y.view(-1, 1).cpu()), 0)
 
-    return y_scaler.inverse_transform(total_labels.numpy().flatten().reshape(-1,1)).flatten(), y_scaler.inverse_transform(total_preds.detach().numpy().flatten().reshape(-1,1)).flatten()
+    y_true = y_scaler.inverse_transform(total_labels.numpy().flatten().reshape(-1,1)).flatten()
+    y_pred = y_scaler.inverse_transform(total_preds.detach().numpy().flatten().reshape(-1,1)).flatten()
+
+    return y_true, y_pred
 
 
 def train(model, device, train_loader, optimizer, epoch, loss_fn):
-    log_interval = 100
+    """
+    Trains the model for one epoch on the training dataset.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The PyTorch model to train.
+    device : torch.device
+        The device to use for training, e.g. 'cpu' or 'cuda'.
+    train_loader : torch.utils.data.DataLoader
+        The data loader for the training dataset.
+    optimizer : torch.optim.Optimizer
+        The optimizer to use for updating model parameters
+    epoch : int
+        The current epoch number (1-indexed).
+    loss_fn : torch.nn.Module
+        The loss function to use for training.
+
+    Returns
+    -------
+    loss : float
+        The average loss over the training dataset.
+    """
     model.train()
     total_loss = 0.0
     for batch_idx, data in enumerate(train_loader):
@@ -106,14 +154,40 @@ def train(model, device, train_loader, optimizer, epoch, loss_fn):
         loss.backward()
         optimizer.step()
         total_loss += (loss.item()*len(data.y))
-        if batch_idx % log_interval == 0:
-            print(f'\nTrain epoch: {epoch} [{batch_idx * len(data.y)}/{len(train_loader.dataset)} ({100. * batch_idx / len(train_loader):.0f}%)]')
 
-    print(f"Loss for epoch {epoch}: {total_loss/len(train_loader.dataset):.4f}")
-    return total_loss/len(train_loader.dataset)
+    loss = total_loss / len(train_loader.dataset)
+    print(f"Loss for epoch {epoch}: {loss:.4f}")
+
+    return loss
 
 
 def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epochs, y_scaler, model_output_dir, model_file_name):
+    """
+    Trains the model over multiple epochs, validates, and saves the best model.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The PyTorch model to train.
+    device : torch.device
+        The device to use for training, e.g. 'cpu' or 'cuda'.
+    loss_fn : torch.nn.Module
+        The loss function to use for training.
+    train_loader : torch.utils.data.DataLoader
+        The data loader for the training dataset.
+    valid_loader : torch.utils.data.DataLoader
+        The data loader for the validation dataset.
+    optimizer : torch.optim.Optimizer
+        The optimizer to use for updating model parameters.
+    n_epochs : int
+        The number of epochs to train for.
+    y_scaler : sklearn.preprocessing.StandardScaler
+        The scaler to inverse-transform predictions.
+    model_output_dir : str
+        The directory to save model checkpoints.
+    model_file_name : str
+        The filename for the saved model.
+    """
     best_pc = -1.1
     pcs = []
     for epoch in range(n_epochs):
@@ -130,12 +204,26 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
         if(avg_pc > best_pc):
             torch.save(model.state_dict(), os.path.join(model_output_dir, model_file_name))
             best_pc = avg_pc  
-            
-        print('The current validation set Pearson correlation:', current_pc)
-    return
+
+        print(f'The current validation set Pearson correlation: {current_pc}')
 
 
 def train_NN(args):
+    """
+    Trains a GATv2Net model on graph data with multiple seeds and evaluates the ensemble.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+            - batch_size (int): Number of graphs per batch.
+            - learning_rate (float): Learning rate for the optimizer.
+            - n_epochs (int): Number of training epochs.
+            - prefix (str): Dataset prefix (e.g., 'dataset').
+            - hidden_dim (int): Hidden layer size.
+            - n_heads (int): Number of attention heads.
+            - act_fn (str): Activation function name.
+    """
     modeling = model_dict['GATv2Net']
     model_st = modeling.__name__
     
