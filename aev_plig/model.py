@@ -15,14 +15,14 @@ class GATv2Net(torch.nn.Module):
         super(GATv2Net, self).__init__()
         
         self.number_GNN_layers = 5
-        self.act = config.activation_function
+        self.act = config.act_fn
         self.activation = activation_function_dict[self.act]
         
         self.GNN_layers = nn.ModuleList()
         self.BN_layers = nn.ModuleList()
         
         input_dim = node_feature_dim
-        head = config.head
+        head = config.n_heads
         hidden_dim = config.hidden_dim
         
         self.GNN_layers.append(GATv2Conv(input_dim, hidden_dim, heads=head, edge_dim=edge_feature_dim))
