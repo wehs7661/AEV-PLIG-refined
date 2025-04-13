@@ -4,28 +4,78 @@ import time
 import torch
 import random
 import pickle
-import warnings
+import datetime
 import argparse
+import aev_plig
 import numpy as np
 import pandas as pd
 import torch.nn as nn
 from torch_geometric.loader import DataLoader
+from aev_plig import utils
 from aev_plig.helpers import rmse, pearson, model_dict
-from aev_plig.utils import GraphDataset, init_weights
 
 
 def initialize(args):
     parser = argparse.ArgumentParser(
         description="This CLI trains an AEV-PLIG model on a dataset."
     )
-    parser.add_argument('--model', type=str, default='GATv2Net')
-    parser.add_argument('--dataset', type=str, default='pdbbind_U_bindingnet_ligsim90')
-    parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--epochs', type=int, default=200)
-    parser.add_argument('--hidden_dim', type=int, default=256)
-    parser.add_argument('--head', type=int, default=3)
-    parser.add_argument('--lr', type=float, default=0.00012291937615434127)
-    parser.add_argument('--activation_function', type=str, default='leaky_relu')
+    parser.add_argument(
+        '-p',
+        '--prefix',
+        type=str,
+        default='dataset',
+        help='The prefix of the dataset name.'
+    )
+    parser.add_argument(
+        '-b',
+        '--batch_size',
+        type=int,
+        default=128,
+        help='The batch size for training. The default is 128.'
+    )
+    parser.add_argument(
+        '-n',
+        '--n_epochs',
+        type=int,
+        default=200,
+        help='The number of epochs for training. The default is 200.'
+    )
+    parser.add_argument(
+        '-hd',
+        '--hidden_dim',
+        type=int,
+        default=256,
+        help='The hidden dimension size. The default is 256.'
+    )
+    parser.add_argument(
+        '-nh',
+        '--n_heads',
+        type=int,
+        default=3,
+        help='The number of attention heads. The default is 3.'
+    )
+    parser.add_argument(
+        '-lr',
+        '--learning_rate',
+        type=float,
+        default=0.00012291937615434127,
+        help='The learning rate. The default is 0.00012291937615434127.'
+    )
+    parser.add_argument(
+        '-a',
+        '--act_fn',
+        type=str,
+        default='leaky_relu',
+        help='The activation function. The default is leaky_relu.'
+    )
+    parser.add_argument(
+        '-l',
+        '--log',
+        type=str,
+        default='train_aev_plig.log',
+        help='The path to the log file. The default is train_aev_plig.log.'
+    )
+
     args = parser.parse_args(args)
     return args
 
@@ -33,7 +83,7 @@ def predict(model, device, loader, y_scaler=None):
     model.eval()
     total_preds = torch.Tensor()
     total_labels = torch.Tensor()
-    print('Make prediction for {} samples...'.format(len(loader.dataset)))
+    # print(f'Make prediction for {len(loader.dataset)} samples...')
     with torch.no_grad():
         for data in loader:
             data = data.to(device)
@@ -57,12 +107,9 @@ def train(model, device, train_loader, optimizer, epoch, loss_fn):
         optimizer.step()
         total_loss += (loss.item()*len(data.y))
         if batch_idx % log_interval == 0:
-            print('Train epoch: {} [{}/{} ({:.0f}%)]'.format(epoch,
-                                                             batch_idx * len(data.y),
-                                                             len(train_loader.dataset),
-                                                             100. * batch_idx / len(train_loader)))
-    
-    print("Loss for epoch {}: {:.4f}".format(epoch, total_loss/len(train_loader.dataset)))
+            print(f'\nTrain epoch: {epoch} [{batch_idx * len(data.y)}/{len(train_loader.dataset)} ({100. * batch_idx / len(train_loader):.0f}%)]')
+
+    print(f"Loss for epoch {epoch}: {total_loss/len(train_loader.dataset):.4f}")
     return total_loss/len(train_loader.dataset)
 
 
@@ -89,32 +136,29 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
 
 
 def train_NN(args):
-    modeling = model_dict[args.model]
+    modeling = model_dict['GATv2Net']
     model_st = modeling.__name__
     
     batch_size = args.batch_size
-    LR = args.lr
-    n_epochs = args.epochs
+    LR = args.learning_rate
+    n_epochs = args.n_epochs
 
-    print('Train for {} epochs: '.format(n_epochs))
-
-    dataset = args.dataset
-
-    print('Running dataset {} on model {}.'.format(dataset, model_st))
+    prefix = args.prefix
+    print(f'Running model {model_st} ...')
     
     timestr = time.strftime("%Y%m%d-%H%M%S")
     model_output_dir = os.path.join("output", "trained_models")
     
-    train_data = GraphDataset(root='data', dataset=dataset+'_train', y_scaler=None)
-    valid_data = GraphDataset(root='data', dataset=dataset+'_valid', y_scaler=train_data.y_scaler)
-    test_data = GraphDataset(root='data', dataset=dataset+'_test', y_scaler=train_data.y_scaler)
+    train_data = utils.GraphDataset(root='data', dataset=f'{prefix}_train', y_scaler=None)
+    valid_data = utils.GraphDataset(root='data', dataset=f'{prefix}_validation', y_scaler=train_data.y_scaler)
+    test_data = utils.GraphDataset(root='data', dataset=f'{prefix}_test', y_scaler=train_data.y_scaler)
 
     seeds = [100, 123, 15, 257, 2, 2012, 3752, 350, 843, 621]
     for i,seed in enumerate(seeds):
         random.seed(seed)
         torch.manual_seed(int(seed))
         
-        model_file_name = timestr + '_model_' + model_st + '_' + dataset + '_' + str(i) + '.model'
+        model_file_name = f'{timestr}_model_{model_st}_{prefix}_{i}.model'
 
         train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
         valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
@@ -125,13 +169,12 @@ def train_NN(args):
             device = torch.device("cuda")
         else:
             device = torch.device("cpu")
-        print('Device state:', device)
 
         model = modeling(node_feature_dim=train_data.num_node_features, edge_feature_dim=train_data.num_edge_features, config=args)
-        model.apply(init_weights)
+        model.apply(utils.init_weights)
     
-        print("The number of node features is ", train_data.num_node_features)
-        print("The number of edge features is ", train_data.num_edge_features)
+        print(f"  - Number of node features: {train_data.num_node_features}")
+        print(f"  - The number of edge features: {train_data.num_edge_features}")
     
         weight_decay = 0
         loss_fn = nn.MSELoss()
@@ -152,7 +195,7 @@ def train_NN(args):
     
     df_test['preds'] = df_test.iloc[:,1:].mean(axis=1)
 
-    scaler_file = 'output/trained_models/' + timestr + '_model_' + model_st + '_' + dataset + '.pickle'
+    scaler_file = f'output/trained_models/{timestr}_model_{model_st}_{prefix}.pickle'    
     with open(scaler_file,'wb') as f:
         pickle.dump(train_data.y_scaler, f)
     
@@ -165,10 +208,15 @@ def train_NN(args):
 
 
 def main():
-    warnings.filterwarnings("ignore", category=UserWarning)
     t0 = time.time()
     args = initialize(sys.argv[1:])
-    # sys.stdout = utils.Logger(args.log)
-    # sys.stderr = utils.Logger(args.log)
+    sys.stdout = utils.Logger(args.log)
+    sys.stderr = utils.Logger(args.log)
+
+    print(f"Version of aev_plig: {aev_plig.__version__}")
+    print(f"Command line: {' '.join(sys.argv)}")
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Current time: {datetime.datetime.now()}\n")
+
     train_NN(args)
     print(f"\nElapsed time: {utils.format_time(time.time() - t0)}")
