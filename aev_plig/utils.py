@@ -73,7 +73,7 @@ class GraphDataset(InMemoryDataset):
             
             data_list.append(data_point)
 
-        print('Graph construction done. Saving to file.')
+        # print('Graph construction done. Saving to file.')
         #self.data, self.slices = self.collate(data_list)
         self.save(data_list, self.processed_paths[0])
         #torch.save((self.data, self.slices), self.processed_paths[0])

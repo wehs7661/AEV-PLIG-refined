@@ -28,11 +28,10 @@ def initialize(args):
             "bindingnet_v1",
             "bindingnet_v2",
             "neuralbind",
-            "fep_benchmark"
             "custom"
         ],
-        help="The dataset to process. Options include pdbbind, bindingnet_v1, bindingnet_v2, bindingdb, neuralbind,\
-            fep_benchmark (FEP benchmark from Schrödinger), and custom (user-defined dataset)."
+        help="The dataset to process. Options include pdbbind, hiqbind, bindingdb, bindingnet_v1, bindingnet_v2, \
+            neuralbind, and custom (user-defined dataset)."
     )
     parser.add_argument(
         "-d",
@@ -596,6 +595,9 @@ def split_dataset(df, split_ratio, random_seed=None):
 def main():
     t0 = time.time()
     args = initialize(sys.argv[1:])
+    log_dir = os.path.dirname(os.path.abspath(args.log))
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir)
     sys.stdout = utils.Logger(args.log)
     sys.stderr = utils.Logger(args.log)
 
