@@ -7,6 +7,7 @@ import numpy as np
 from torch_geometric.data import InMemoryDataset, Data
 import torch
 from sklearn.preprocessing import StandardScaler
+from rdkit import Chem
 
 def set_seed(seed):
     """
@@ -225,3 +226,28 @@ def format_time(t):
             t_str = f"{hh:.0f} hour(s) {mm:.0f} minute(s) {ss:.0f} second(s)"
 
     return t_str
+
+
+def get_atom_types_from_sdf(sdf_file):
+    """
+    Get the atom types from an SDF file.
+
+    Parameters
+    ----------
+    sdf_file : str
+        Path to the SDF file.
+    
+    Returns
+    -------
+    atom_types : list
+        List of atom types.
+    """
+    suppl = Chem.SDMolSupplier(sdf_file)
+    atom_types = []
+    for mol in suppl:
+        if mol is not None:
+            for atom in mol.GetAtoms():
+                atom_types.append(atom.GetSymbol())
+    
+    atom_types = list(set(atom_types))
+    return atom_types
