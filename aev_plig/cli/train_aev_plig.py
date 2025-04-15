@@ -70,6 +70,21 @@ def initialize(args):
         help='The activation function. The default is leaky_relu.'
     )
     parser.add_argument(
+        '-nm',
+        '--n_models',
+        type=int,
+        default=5,
+        help='The number of models to train. The default is 5.'
+    )
+    parser.add_argument(
+        '-s',
+        '--seeds',
+        type=int,
+        nargs='+',
+        help='The random seed(s) to use for training. By default, list(range(1, n_models+1)) is used.\
+            where n_models is the number of models to train, as specified by the -nm/--n_models flag.'
+    )
+    parser.add_argument(
         '-l',
         '--log',
         type=str,
@@ -105,7 +120,7 @@ def predict(model, device, loader, y_scaler=None):
     model.eval()
     total_preds = torch.Tensor()
     total_labels = torch.Tensor()
-    print(f'Make prediction for {len(loader.dataset)} samples...')
+    # print(f'Make prediction for {len(loader.dataset)} samples...')
     with torch.no_grad():
         for data in loader:
             # Iterate over batches of data from loader
@@ -155,11 +170,13 @@ def train(model, device, train_loader, optimizer, epoch, loss_fn):
         loss.backward()
         optimizer.step()
         total_loss += (loss.item()*len(data.y))
+        """
         if batch_idx % log_interval == 0:
             print('Train epoch: {} [{}/{} ({:.0f}%)]'.format(epoch,
                                                         batch_idx * len(data.y),
                                                         len(train_loader.dataset),
                                                         100. * batch_idx / len(train_loader)))
+        """
 
     loss = total_loss / len(train_loader.dataset)
     print(f"Loss for epoch {epoch}: {loss:.4f}")
@@ -211,7 +228,7 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
             torch.save(model.state_dict(), os.path.join(model_output_dir, model_file_name))
             best_pc = avg_pc  
 
-        print(f'The current validation set Pearson correlation: {current_pc}')
+        print(f'The current validation set Pearson correlation: {current_pc}\n')
 
 
 def train_NN(args):
@@ -241,15 +258,16 @@ def train_NN(args):
     print(f'Running model {model_st} ...')
     
     timestr = time.strftime("%Y%m%d-%H%M%S")
-    model_output_dir = os.path.join("output", "trained_models")
+    model_output_dir = os.path.abspath(os.path.join("output", "trained_models"))
+    if not os.path.exists(model_output_dir):
+        os.makedirs(model_output_dir)
     
     train_data = utils.GraphDataset(root='data', dataset=f'{prefix}_train', y_scaler=None)
     valid_data = utils.GraphDataset(root='data', dataset=f'{prefix}_validation', y_scaler=train_data.y_scaler)
     test_data = utils.GraphDataset(root='data', dataset=f'{prefix}_test', y_scaler=train_data.y_scaler)
 
-    seeds = [100, 123, 15, 257, 2] # , 2012, 3752, 350, 843, 621]
-    for i,seed in enumerate(seeds):
-        print(f'Training model {i+1} with seed {seed} ...')
+    for i, seed in enumerate(args.seeds):
+        print(f'\nTraining model {i + 1} with seed {seed} ...')
         random.seed(seed)
         torch.manual_seed(int(seed))
         
@@ -263,6 +281,7 @@ def train_NN(args):
             print("GPU is available")
             device = torch.device("cuda")
         else:
+            print("GPU is NOT available")
             device = torch.device("cpu")
 
         model = modeling(node_feature_dim=train_data.num_node_features, edge_feature_dim=train_data.num_edge_features, config=args)
@@ -305,6 +324,8 @@ def train_NN(args):
 def main():
     t0 = time.time()
     args = initialize(sys.argv[1:])
+    if args.seeds is None:
+        args.seeds = list(range(1, args.n_models + 1))
     sys.stdout = utils.Logger(args.log)
     sys.stderr = utils.Logger(args.log)
 
