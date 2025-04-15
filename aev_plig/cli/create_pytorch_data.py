@@ -16,11 +16,12 @@ def initialize(args):
         description="This CLI process pickled graphs and create PyTorch data ready for training."
     )
     parser.add_argument(
-        "-d",
-        "--dir",
+        "-pg",
+        "--pickled_graphs",
         type=str,
+        nargs='+',
         required=True,
-        help="The directory containing the pickled graphs."
+        help="The paths to the pickled graphs. The pickled graphs should be in the format of .pkl or .pickle."
     )
     parser.add_argument(
         "-c",
@@ -28,8 +29,9 @@ def initialize(args):
         type=str,
         nargs='+',
         required=True,
-        help="The paths to the input processed CSV files, each corresponding to a pickled graph. Each CSV file \
-            should at least have columns including 'system_id', 'protein_path', 'ligand_path', 'pK', and 'split'."
+        help="The paths to the input processed CSV files, each corresponding to a pickled graph. The order of the CSV files \
+            should match the order of the pickled graphs. The CSV files should contain the columns 'system_id', 'protein_path', \
+            'ligand_path', 'pK', and 'split'. The 'system_id' column should contain the same IDs as the pickled graphs."
     )
     parser.add_argument(
         "-f",
@@ -151,12 +153,10 @@ def main():
     print(f"Current time: {datetime.datetime.now()}\n")
 
     # 1. Load the pickled graphs
-    pickle_files = glob.glob(os.path.join(args.dir, "*.pkl")) + glob.glob(os.path.join(args.dir, "*.pickle"))
-    print(f"Pickled graphs found in {args.dir}: {pickle_files}")
-    print(f"Loading pickled graphs ...")
+    print(f"Loading pickled graphs from {args.pickled_graphs}...")
     graphs_dict = {}
-    for pickle_file in pickle_files:
-        with open(pickle_file, "rb") as f:
+    for pickled_graph in args.pickled_graphs:
+        with open(pickled_graph, "rb") as f:
             graphs = pickle.load(f)
         graphs_dict.update(graphs)
 
@@ -176,7 +176,7 @@ def main():
     print(f'\nNumber of training entries: {len(data[data["split"] == "train"])}')
     print(f'Number of validation entries: {len(data[data["split"] == "validation"])}')
     print(f'Number of test entries: {len(data[data["split"] == "test"])}')
-    print(f'Number of other entries: {len(data[data["split"] != "others"])}\n')
+    print(f'Number of other entries: {len(data[data["split"] == "others"])}\n')
 
     # 3. Create PyTorch data
     splits = ['train', 'validation', 'test']

@@ -144,6 +144,7 @@ def train(model, device, train_loader, optimizer, epoch, loss_fn):
     loss : float
         The average loss over the training dataset.
     """
+    log_interval = 100
     model.train()
     total_loss = 0.0
     for batch_idx, data in enumerate(train_loader):
@@ -154,6 +155,11 @@ def train(model, device, train_loader, optimizer, epoch, loss_fn):
         loss.backward()
         optimizer.step()
         total_loss += (loss.item()*len(data.y))
+        if batch_idx % log_interval == 0:
+            print('Train epoch: {} [{}/{} ({:.0f}%)]'.format(epoch,
+                                                        batch_idx * len(data.y),
+                                                        len(train_loader.dataset),
+                                                        100. * batch_idx / len(train_loader)))
 
     loss = total_loss / len(train_loader.dataset)
     print(f"Loss for epoch {epoch}: {loss:.4f}")
@@ -190,7 +196,7 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
     """
     best_pc = -1.1
     pcs = []
-    for epoch in range(n_epochs):
+    for epoch in tqdm(range(n_epochs), desc="Training", unit="epoch", file=sys.__stderr__):
     
         _ = train(model, device, train_loader, optimizer, epoch + 1, loss_fn)
         
@@ -241,8 +247,9 @@ def train_NN(args):
     valid_data = utils.GraphDataset(root='data', dataset=f'{prefix}_validation', y_scaler=train_data.y_scaler)
     test_data = utils.GraphDataset(root='data', dataset=f'{prefix}_test', y_scaler=train_data.y_scaler)
 
-    seeds = [100, 123, 15, 257, 2, 2012, 3752, 350, 843, 621]
+    seeds = [100, 123, 15, 257, 2] # , 2012, 3752, 350, 843, 621]
     for i,seed in enumerate(seeds):
+        print(f'Training model {i+1} with seed {seed} ...')
         random.seed(seed)
         torch.manual_seed(int(seed))
         
