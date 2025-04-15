@@ -120,7 +120,6 @@ def predict(model, device, loader, y_scaler=None):
     model.eval()
     total_preds = torch.Tensor()
     total_labels = torch.Tensor()
-    # print(f'Make prediction for {len(loader.dataset)} samples...')
     with torch.no_grad():
         for data in loader:
             # Iterate over batches of data from loader
@@ -131,7 +130,8 @@ def predict(model, device, loader, y_scaler=None):
 
     y_true = y_scaler.inverse_transform(total_labels.numpy().flatten().reshape(-1,1)).flatten()
     y_pred = y_scaler.inverse_transform(total_preds.detach().numpy().flatten().reshape(-1,1)).flatten()
-
+    print(y_true)
+    print(y_pred)
     return y_true, y_pred
 
 
@@ -231,30 +231,31 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
         print(f'The current validation set Pearson correlation: {current_pc}\n')
 
 
-def train_NN(args):
+def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, act_fn, seeds):
     """
     Trains a GATv2Net model on graph data with multiple seeds and evaluates the ensemble.
 
     Parameters
     ----------
-    args : argparse.Namespace
-        Command-line arguments containing:
-            - batch_size (int): Number of graphs per batch.
-            - learning_rate (float): Learning rate for the optimizer.
-            - n_epochs (int): Number of training epochs.
-            - prefix (str): Dataset prefix (e.g., 'dataset').
-            - hidden_dim (int): Hidden layer size.
-            - n_heads (int): Number of attention heads.
-            - act_fn (str): Activation function name.
+    batch_size : int
+        Number of graphs per batch.
+    learning_rate : float
+        Learning rate for the optimizer.
+    n_epochs : int
+        Number of training epochs.
+    prefix : str
+        Dataset prefix (e.g., 'dataset').
+    hidden_dim : int
+        Hidden layer size.
+    n_heads : int
+        Number of attention heads.
+    act_fn : str
+        Activation function name.
+    seeds : list of int
+        List of random seeds for training multiple models.
     """
     modeling = model_dict['GATv2Net']
     model_st = modeling.__name__
-    
-    batch_size = args.batch_size
-    LR = args.learning_rate
-    n_epochs = args.n_epochs
-
-    prefix = args.prefix
     print(f'Running model {model_st} ...')
     
     timestr = time.strftime("%Y%m%d-%H%M%S")
@@ -266,10 +267,9 @@ def train_NN(args):
     valid_data = utils.GraphDataset(root='data', dataset=f'{prefix}_validation', y_scaler=train_data.y_scaler)
     test_data = utils.GraphDataset(root='data', dataset=f'{prefix}_test', y_scaler=train_data.y_scaler)
 
-    for i, seed in enumerate(args.seeds):
+    for i, seed in enumerate(seeds):
         print(f'\nTraining model {i + 1} with seed {seed} ...')
-        random.seed(seed)
-        torch.manual_seed(int(seed))
+        utils.set_seed(seed)
         
         model_file_name = f'{timestr}_model_{model_st}_{prefix}_{i}.model'
 
@@ -284,7 +284,20 @@ def train_NN(args):
             print("GPU is NOT available")
             device = torch.device("cpu")
 
-        model = modeling(node_feature_dim=train_data.num_node_features, edge_feature_dim=train_data.num_edge_features, config=args)
+        config = argparse.Namespace(
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            n_epochs=n_epochs,
+            prefix=prefix,
+            hidden_dim=hidden_dim,
+            n_heads=n_heads,
+            act_fn=act_fn
+        )
+        model = modeling(
+            node_feature_dim=train_data.num_node_features,
+            edge_feature_dim=train_data.num_edge_features,
+            config=config
+        )
         model.apply(utils.init_weights)
     
         print(f"  - Number of node features: {train_data.num_node_features}")
@@ -292,20 +305,31 @@ def train_NN(args):
     
         weight_decay = 0
         loss_fn = nn.MSELoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=weight_decay)
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     
         model.to(device)
-        _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epochs, train_data.y_scaler, model_output_dir, model_file_name)
+        _train(
+            model=model,
+            device=device,
+            loss_fn=loss_fn,
+            train_loader=train_loader,
+            valid_loader=valid_loader,
+            optimizer=optimizer,
+            n_epochs=n_epochs,
+            y_scaler=train_data.y_scaler,
+            model_output_dir=model_output_dir,
+            model_file_name=model_file_name
+        )
         
         model.load_state_dict(torch.load(os.path.join(model_output_dir, model_file_name)))
         
-        G_test, P_test = predict(model, device, test_loader, train_data.y_scaler)
+        y_true, y_pred = predict(model, device, test_loader, train_data.y_scaler)
 
         if(i == 0):
-            df_test = pd.DataFrame(data=G_test, index=range(len(G_test)), columns=['truth'])
+            df_test = pd.DataFrame(data=y_true, index=range(len(y_true)), columns=['truth'])
         
         col = 'preds_' + str(i)
-        df_test[col] = P_test
+        df_test[col] = y_pred
     
     df_test['preds'] = df_test.iloc[:,1:].mean(axis=1)
 
@@ -313,6 +337,7 @@ def train_NN(args):
     with open(scaler_file,'wb') as f:
         pickle.dump(train_data.y_scaler, f)
     
+    print(df_test.max())
     test_preds = np.array(df_test['preds'])
     test_truth = np.array(df_test['truth'])
     test_ens_pc = pearson(test_truth, test_preds)
@@ -334,5 +359,14 @@ def main():
     print(f"Current working directory: {os.getcwd()}")
     print(f"Current time: {datetime.datetime.now()}\n")
 
-    train_NN(args)
+    train_NN(
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        n_epochs=args.n_epochs,
+        prefix=args.prefix,
+        hidden_dim=args.hidden_dim,
+        n_heads=args.n_heads,
+        act_fn=args.act_fn,
+        seeds=args.seeds
+    )
     print(f"\nElapsed time: {utils.format_time(time.time() - t0)}")

@@ -8,6 +8,22 @@ from torch_geometric.data import InMemoryDataset, Data
 import torch
 from sklearn.preprocessing import StandardScaler
 
+def set_seed(seed):
+    """
+    Set the random seed for reproducibility.
+
+    Parameters
+    ----------
+    seed : int
+        The seed value to be set for random number generation.
+    """
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
 def init_weights(layer):
     if hasattr(layer, "weight") and "BatchNorm" not in str(layer):
         torch.nn.init.xavier_normal_(layer.weight)
