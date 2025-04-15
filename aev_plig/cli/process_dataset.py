@@ -233,7 +233,7 @@ class HiQBindCollector(DatasetCollector):
             ligand_name = row["Ligand Name"]
             ligand_chain = row["Ligand Chain"]
             ligand_resnum = row["Ligand Residue Number"]
-            pK = row["Log Binding Affinity"]
+            pK = -row["Log Binding Affinity"]
             subset = row["subset"]
 
             system_id = f"{pdb_id}_{ligand_chain}_{ligand_resnum}"
@@ -606,16 +606,37 @@ def main():
     print(f"Current working directory: {os.getcwd()}")
     print(f"Current time: {datetime.datetime.now()}\n")
 
+    # 1. Collect entries from the dataset
     print(f"Processing {args.dataset} ...\n")
     args.output = f"processed_{args.dataset}.csv" if args.output is None else args.output
     df = collect_entries(args.dir, args.dataset)
+    df['split'] = ''  # We will assign the split later
     
+    # 2. Filter the dataset
+    dropped_df = pd.DataFrame(columns=list(df.columns) + ['reason'])
+
+    # 2.1. Drop entries that are also present in csv_filter
     if args.csv_filter:
         print(f"Filtering out entries present in {args.csv_filter} ...")
         filter_df = pd.read_csv(args.csv_filter)
         filter_ids = filter_df["system_id"].tolist()
+        to_drop = df[df["system_id"].isin(filter_ids)].copy()
+        to_drop['reason'] = f'Overalp with {os.path.basename(args.csv_filter)}'
+        dropped_df = pd.concat([dropped_df, to_drop])
         df = df[~df["system_id"].isin(filter_ids)]
+        print(f"Dropped {len(to_drop)} entries from that were also present in dataset {os.path.basename(args.csv_filter)}.")
 
+    # 2.2. Drop entries with rare elements in the ligand
+    df['atom_types'] = df['ligand_path'].apply(lambda x: utils.get_atom_types_from_sdf(x))
+    allowed_elements = set(['F', 'N', 'Cl', 'O', 'Br', 'C', 'B', 'P', 'I', 'S'])
+    mask_uncommon = df['atom_types'].apply(lambda x: not set(x).issubset(allowed_elements))
+    to_drop = df[mask_uncommon].copy()
+    to_drop['reason'] = 'Rare elements in ligand'
+    dropped_df = pd.concat([dropped_df, to_drop])
+    df = df[~mask_uncommon]
+    print(f"Dropped {len(to_drop)} entries with rare elements in the ligand.")
+
+    # 2.3. Drop entries with high similarity to the reference dataset
     if args.csv_ref:
         print(f"Generating fingerprints for all ligands in {args.csv_ref} and {args.dataset} ...")
         df_ref = pd.read_csv(args.csv_ref)
@@ -625,22 +646,30 @@ def main():
         print(f"\nCalculating maximum Tanimoto similarity to {os.path.basename(args.csv_ref)} for each ligand in {args.dataset} ...")
         max_sims = calc_metrics.calc_max_tanimoto_similarity(fps, fps_ref)
         df['max_tanimoto_ref'] = np.nan
-        df.loc[valid_indices, 'max_tanimoto_ref'] = max_sims
+        df.iloc[valid_indices, df.columns.get_loc('max_tanimoto_ref')] = max_sims
     
-    df['split'] = ''
-    df.loc[df.isna().any(axis=1), 'split'] = 'others'
-    # print(df[df['split'] == 'others'])
-    if args.similarity_cutoff < 1.0:
-        print(f"Filtering out ligands with maximum Tanimoto similarity >= {args.similarity_cutoff} ...")
-        df.loc[df['max_tanimoto_ref'] > args.similarity_cutoff, 'split'] = 'others'
+        if args.similarity_cutoff < 1.0:
+            to_drop = df[df['max_tanimoto_ref'] > args.similarity_cutoff].copy()
+            to_drop['reason'] = f'Max Tanimoto similarity > {args.similarity_cutoff}'
+            dropped_df = pd.concat([dropped_df, to_drop])
+            df = df[df['max_tanimoto_ref'] <= args.similarity_cutoff]
+            print(f"Dropped {len(to_drop)} entries with maximum Tanimoto similarity > {args.similarity_cutoff} with respect to {os.path.basename(args.csv_ref)}.")
+
+    # 2.4. Drop entries with nan values in any column
+    to_drop = df[df.isna().any(axis=1)].copy()
+    to_drop['reason'] = 'NaN values'
+    dropped_df = pd.concat([dropped_df, to_drop])
+    df = df.dropna()
+    print(f"Dropped {len(to_drop)} entries with NaN values in any column.")
 
     print(f"Splitting the dataset ...")
     df = split_dataset(df, args.split, random_seed=args.random_seed)
     print('  - Number of train entries:', len(df[df['split'] == 'train']))
     print('  - Number of validation entries:', len(df[df['split'] == 'validation']))
     print('  - Number of test entries:', len(df[df['split'] == 'test']))
-    print('  - Number of other entries:', len(df[df['split'] == 'others']))
 
     df.to_csv(args.output, index=False)
+    dropped_df.to_csv(f"{args.output.replace('.csv', '_dropped.csv')}", index=False)
     print(f"\nProcessed dataset saved to {args.output}")
+    print(f"Dropped entries saved to {args.output.replace('.csv', '_dropped.csv')}")
     print(f"Elapsed time: {utils.format_time(time.time() - t0)}")

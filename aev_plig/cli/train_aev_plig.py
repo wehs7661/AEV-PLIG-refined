@@ -130,8 +130,6 @@ def predict(model, device, loader, y_scaler=None):
 
     y_true = y_scaler.inverse_transform(total_labels.numpy().flatten().reshape(-1,1)).flatten()
     y_pred = y_scaler.inverse_transform(total_preds.detach().numpy().flatten().reshape(-1,1)).flatten()
-    print(y_true)
-    print(y_pred)
     return y_true, y_pred
 
 
@@ -170,16 +168,9 @@ def train(model, device, train_loader, optimizer, epoch, loss_fn):
         loss.backward()
         optimizer.step()
         total_loss += (loss.item()*len(data.y))
-        """
-        if batch_idx % log_interval == 0:
-            print('Train epoch: {} [{}/{} ({:.0f}%)]'.format(epoch,
-                                                        batch_idx * len(data.y),
-                                                        len(train_loader.dataset),
-                                                        100. * batch_idx / len(train_loader)))
-        """
 
     loss = total_loss / len(train_loader.dataset)
-    print(f"Loss for epoch {epoch}: {loss:.4f}")
+    print(f"\n  Validation loss of epoch {epoch}: {loss:.4f}")
 
     return loss
 
@@ -217,9 +208,9 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
     
         _ = train(model, device, train_loader, optimizer, epoch + 1, loss_fn)
         
-        G, P = predict(model, device, valid_loader, y_scaler)
+        y_true, y_label = predict(model, device, valid_loader, y_scaler)
 
-        current_pc = pearson(G, P)
+        current_pc = pearson(y_true, y_label)
         pcs.append(current_pc)
         
         low = np.maximum(epoch-7,0)
@@ -228,7 +219,7 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
             torch.save(model.state_dict(), os.path.join(model_output_dir, model_file_name))
             best_pc = avg_pc  
 
-        print(f'The current validation set Pearson correlation: {current_pc}\n')
+        print(f'  Current Pearson correlation coefficient: {current_pc}')
 
 
 def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, act_fn, seeds):
@@ -254,9 +245,15 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
     seeds : list of int
         List of random seeds for training multiple models.
     """
+    if(torch.cuda.is_available()):
+        print("GPU is available")
+        device = torch.device("cuda")
+    else:
+        print("GPU is NOT available")
+        device = torch.device("cpu")
+
     modeling = model_dict['GATv2Net']
     model_st = modeling.__name__
-    print(f'Running model {model_st} ...')
     
     timestr = time.strftime("%Y%m%d-%H%M%S")
     model_output_dir = os.path.abspath(os.path.join("output", "trained_models"))
@@ -266,9 +263,11 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
     train_data = utils.GraphDataset(root='data', dataset=f'{prefix}_train', y_scaler=None)
     valid_data = utils.GraphDataset(root='data', dataset=f'{prefix}_validation', y_scaler=train_data.y_scaler)
     test_data = utils.GraphDataset(root='data', dataset=f'{prefix}_test', y_scaler=train_data.y_scaler)
+    print(f"Number of node features: {train_data.num_node_features}")
+    print(f"The number of edge features: {train_data.num_edge_features}")
 
     for i, seed in enumerate(seeds):
-        print(f'\nTraining model {i + 1} with seed {seed} ...')
+        print(f'\nTraining a {model_st} model {i + 1} with seed {seed} ...')
         utils.set_seed(seed)
         
         model_file_name = f'{timestr}_model_{model_st}_{prefix}_{i}.model'
@@ -276,13 +275,6 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
         train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
         valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
         test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
-
-        if(torch.cuda.is_available()):
-            print("GPU is available")
-            device = torch.device("cuda")
-        else:
-            print("GPU is NOT available")
-            device = torch.device("cpu")
 
         config = argparse.Namespace(
             batch_size=batch_size,
@@ -299,9 +291,6 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
             config=config
         )
         model.apply(utils.init_weights)
-    
-        print(f"  - Number of node features: {train_data.num_node_features}")
-        print(f"  - The number of edge features: {train_data.num_edge_features}")
     
         weight_decay = 0
         loss_fn = nn.MSELoss()
@@ -325,11 +314,12 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
         
         y_true, y_pred = predict(model, device, test_loader, train_data.y_scaler)
 
-        if(i == 0):
+        if i == 0:
             df_test = pd.DataFrame(data=y_true, index=range(len(y_true)), columns=['truth'])
         
         col = 'preds_' + str(i)
         df_test[col] = y_pred
+        print(f"Test Pearson correlation for model {i + 1}: {pearson(y_true, y_pred)}")
     
     df_test['preds'] = df_test.iloc[:,1:].mean(axis=1)
 
@@ -357,7 +347,7 @@ def main():
     print(f"Version of aev_plig: {aev_plig.__version__}")
     print(f"Command line: {' '.join(sys.argv)}")
     print(f"Current working directory: {os.getcwd()}")
-    print(f"Current time: {datetime.datetime.now()}\n")
+    print(f"Current time: {datetime.datetime.now()}")
 
     train_NN(
         batch_size=args.batch_size,
