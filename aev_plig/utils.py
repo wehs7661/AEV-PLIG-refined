@@ -8,6 +8,8 @@ from torch_geometric.data import InMemoryDataset, Data
 import torch
 from sklearn.preprocessing import StandardScaler
 from rdkit import Chem
+import multiprocessing as mp
+from tqdm import tqdm
 
 def set_seed(seed):
     """
@@ -251,3 +253,15 @@ def get_atom_types_from_sdf(sdf_file):
     
     atom_types = list(set(atom_types))
     return atom_types
+
+def get_atom_types_from_sdf_parallelized(paths):
+    with mp.Pool(initializer=lambda:os.sched_setaffinity(0, set(range(mp.cpu_count())))) as pool:
+        results = list(
+            tqdm(
+                pool.imap(get_atom_types_from_sdf, paths),
+                total=len(paths),
+                desc="Getting atom types from SDF",
+                file=sys.__stderr__,
+            )
+        )
+    return results
