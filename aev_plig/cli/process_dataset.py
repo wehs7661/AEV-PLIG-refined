@@ -682,7 +682,6 @@ def main():
         df = collect_entries(args.dir, args.dataset)
     else:
         df = collect_entries(args.dir[0], args.dataset)
-    df['split'] = ''  # We will assign the split later
     
     # 2. Filter the dataset
     dropped_df = pd.DataFrame(columns=list(df.columns) + ['reason'])
