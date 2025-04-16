@@ -13,8 +13,8 @@ import pandas as pd
 import qcelemental as qcel
 from tqdm import tqdm
 from rdkit import Chem
+from aev_plig import utils
 from aev_plig.data import data_dir
-from aev_plig.utils import Logger
 from multiprocessing import Pool, cpu_count
 
 
@@ -96,29 +96,76 @@ def LoadMolasDF(mol):
 
 
 def LoadPDBasDF(PDB, atom_keys):
-# This function converts a protein PDB file into a pandas DataFrame with the protein atom position in 3D (X,Y,Z)
+    """
+    Converts a protein PDB file into a pandas DataFrame having columns including
+    ATOM_INDEX, ATOM_TYPE, X, Y, and Z. Note that this function filters out hydrogen atoms
+    and do not consider HETATM records.
 
+    Parameters
+    ----------
+    PDB: str
+        Path to the PDB file.
+    atom_keys: pd.DataFrame
+        DataFrame containing atom types and their corresponding keys.
+
+    Returns
+    -------
+    df : pd.DataFrame
+        DataFrame with columns ATOM_INDEX, ATOM_TYPE, X, Y, and Z.
+    """
     prot_atoms = []
-    
-    f = open(PDB)
-    for i in f:
-        if i[:4] == "ATOM":
-            # Include only non-hydrogen atoms
-            if (len(i[12:16].replace(" ","")) < 4 and i[12:16].replace(" ","")[0] != "H") or (len(i[12:16].replace(" ","")) == 4 and i[12:16].replace(" ","")[1] != "H" and i[12:16].replace(" ","")[0] != "H"):
-                prot_atoms.append([int(i[6:11]),
-                         i[17:20]+"-"+i[12:16].replace(" ",""),
-                         float(i[30:38]),
-                         float(i[38:46]),
-                         float(i[46:54])
-                        ])
-                
-    f.close()
-    
-    df = pd.DataFrame(prot_atoms, columns=["ATOM_INDEX","PDB_ATOM","X","Y","Z"])
-    df = df.merge(atom_keys, left_on='PDB_ATOM', right_on='PDB_ATOM')[["ATOM_INDEX", "ATOM_TYPE", "X", "Y", "Z"]].sort_values(by="ATOM_INDEX").reset_index(drop=True)
+    auto_serial = 100000  # Upon this number, we assume contiguous indexing
+    max_seen_index = 0  # track max index for all atoms (including hydrogen)
+
+    with open(PDB) as f:
+        for i, line in enumerate(f):
+            if not line.startswith("ATOM"):
+                continue
+
+            atom_name = line[12:16].strip()
+            resname = line[17:20].strip()
+            index_str = line[6:11].strip()
+
+            if index_str.isdigit():
+                atom_index = int(index_str)
+                if atom_index > max_seen_index:
+                    max_seen_index = atom_index
+            else:
+                # print(max_atom_index, line)
+                assert max_seen_index >= 99999, f"There exist atom indices with non-numeric values \
+                    before the number of atoms exceeds 99999. (position: {i})"
+                atom_index = auto_serial
+                auto_serial += 1
+
+            # Skip hydrogens when adding to prot_atoms
+            is_hydrogen = (
+                (len(atom_name) < 4 and atom_name[0] == "H") or
+                (len(atom_name) == 4 and (atom_name[0] == "H" or atom_name[1] == "H"))
+            )
+            if is_hydrogen:
+                continue
+
+            x = float(line[30:38])
+            y = float(line[38:46])
+            z = float(line[46:54])
+            pdb_atom = f"{resname}-{atom_name}"            
+            prot_atoms.append([atom_index, pdb_atom, x, y, z])
+
+    df = pd.DataFrame(prot_atoms, columns=["ATOM_INDEX", "PDB_ATOM", "X", "Y", "Z"])
+    df = (
+        df
+        .merge(atom_keys, left_on='PDB_ATOM', right_on='PDB_ATOM')
+        [["ATOM_INDEX", "ATOM_TYPE", "X", "Y", "Z"]]
+        .sort_values(by="ATOM_INDEX")
+        .reset_index(drop=True)
+    )
+
     if list(df["ATOM_TYPE"].isna()).count(True) > 0:
         print("WARNING: Protein contains unsupported atom types. Only supported atom-type pairs are counted.")
+   
+    print(df)
     return df
+
 
 
 def GetMolAEVs_extended(protein_path, mol, atom_keys, radial_coefs, atom_map):
@@ -441,8 +488,8 @@ def process_row(args):
 def main():
     t0 = time.time()
     args = initialize(sys.argv[1:])
-    sys.stdout = Logger(args.log)
-    sys.stderr = Logger(args.log)
+    sys.stdout = utils.Logger(args.log)
+    sys.stderr = utils.Logger(args.log)
 
     print(f"Version of aev_plig: {aev_plig.__version__}")
     print(f"Command line: {' '.join(sys.argv)}")
@@ -494,4 +541,4 @@ def main():
     with open(args.output, 'wb') as handle:
         pickle.dump(mol_graphs, handle, protocol=pickle.HIGHEST_PROTOCOL)
     
-    print(f"Elapsed time: {time.time() - t0:.2f} seconds")
+    print(f"Elapsed time: {utils.format_time(time.time() - t0)}")
