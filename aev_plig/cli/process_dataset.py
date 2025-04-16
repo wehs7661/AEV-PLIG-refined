@@ -27,6 +27,7 @@ def initialize(args):
             "bindingdb",
             "bindingnet_v1",
             "bindingnet_v2",
+            "bindingnet_v1_v2",
             "neuralbind",
             "custom"
         ],
@@ -38,7 +39,10 @@ def initialize(args):
         "--dir",
         type=str,
         required=True,
-        help="The root directory containing the dataset."
+        nargs ="+",
+        help="The root directory containing the dataset. Note that if bindingnet_v1_v2 is selected as the dataset, \
+            (via the flag -ds/--dataset), two directories must be provided: the first one is for BindingNet v1\
+            and the second one is for BindingNet v2."
     )
     parser.add_argument(
         "-cr",
@@ -410,7 +414,7 @@ class BindingNetV2Collector(DatasetCollector):
         )
         df['system_id'] = df['Target ChEMBLID'] + '_' + df['Molecule ChEMBLID']
         binding_dict = dict(zip(df['system_id'], df['-logAffi']))
-        
+
         # 2. Collect file paths
         for _, row in tqdm(df.iterrows(), desc="Collecting BindingNet v2 entries", file=sys.__stderr__):
             system_id = row['system_id']
@@ -428,6 +432,64 @@ class BindingNetV2Collector(DatasetCollector):
         
         df = pd.DataFrame(self.data)
         return df
+
+class BindingNetV1V2Collector(DatasetCollector):
+    """
+    Collector for the union set of BindingNet v1 and v2 datasets. Entries from v2 are prioritized
+    for overlapping system IDs.
+    """
+    def __init__(self, base_dir_v1, base_dir_v2):
+        """
+        Initializes the BindingNetV1V2Collector with base directories for v1 and v2 datasets.
+
+        Parameters
+        ----------
+        base_dir_v1 : str
+            The base directory containing the BindingNet v1 dataset files.
+        base_dir_v2 : str
+            The base directory containing the BindingNet v2 dataset files.
+        """
+        self.base_dir_v1 = base_dir_v1
+        self.base_dir_v2 = base_dir_v2
+
+
+    def collect(self):
+        """
+        Collect entries from both BindingNet v1 and v2 datasets.
+
+        Returns
+        -------
+        df : pandas.DataFrame
+            A DataFrame with system_id, pK, protein_path, and ligand_path.
+        """
+        # 1. Collect v1 and v2 entries separately using their own collectors
+        print('Collecting entries from BindingNet v1 ...')
+        v1_collector = BindingNetV1Collector(self.base_dir_v1)
+        df_v1 = v1_collector.collect()
+
+        print('Collecting entries from BindingNet v2 ...')
+        v2_collector = BindingNetV2Collector(self.base_dir_v2)
+        df_v2 = v2_collector.collect()
+
+        # 2. Drop overlapping entries in v1
+        # Note that the system_id in v1 is in the format of "target_chemblid_pdbid_ligand_chemblid"
+        # and in v2 is in the format of "target_chemblid_ligand_chemblid"
+        v2_ids = set(df_v2['system_id'])
+        split_cols = df_v1['system_id'].str.split("_", expand=True)
+        df_v1['system_id_simplified'] = split_cols[0] + "_" + split_cols[2]
+        df_v1_unique = df_v1[~df_v1['system_id_simplified'].isin(v2_ids)]
+        
+        df_overlap = df_v1[df_v1['system_id_simplified'].isin(v2_ids)]
+        print(f'Number of entries that are only in BindingNet v1: {len(df_v1_unique)}')
+        print(f'Number of entries that are only in BindingNet v2: {len(df_v2) - len(df_overlap)}')
+        print(f'Number of entries that are in both BindingNet v1 and v2: {len(df_overlap)}')
+
+        # 3. Combined v2 entries with the remaining v1 entries
+        df_combined = pd.concat([df_v1_unique, df_v2], ignore_index=True)
+        df_combined = df_combined.sort_values(by='system_id').reset_index(drop=True)
+        df_combined = df_combined.drop(columns=['system_id_simplified'])
+
+        return df_combined
 
 class NeuralBindCollector(DatasetCollector):
     """
@@ -522,19 +584,26 @@ def collect_entries(base_dir, dataset, config=None):
         "bindingdb": BindingDBCollector,
         "bindingnet_v1": BindingNetV1Collector,
         "bindingnet_v2": BindingNetV2Collector,
+        "bindingnet_v1_v2": BindingNetV1V2Collector,
         "neuralbind": NeuralBindCollector,
         "custom": CustomDatasetCollector,
     }
     
     if dataset not in collectors:
         raise ValueError(f"Invalid dataset: {dataset}. Available options are: {', '.join(collectors.keys())}.")
-    if dataset == "custom":
+    
+    if dataset == "bindingnet_v1_v2":
+        base_dir_v1, base_dir_v2 = base_dir
+        collector = BindingNetV1V2Collector(base_dir_v1, base_dir_v2)
+    elif dataset == "custom":
         if not config:
             raise ValueError("Custom dataset requires a configuration dictionary.")
         collector = collectors[dataset](base_dir, config)
     else:
         collector = collectors[dataset](base_dir)
+
     df = collector.collect()
+
     return df
 
 
@@ -608,8 +677,11 @@ def main():
 
     # 1. Collect entries from the dataset
     print(f"Processing {args.dataset} ...\n")
-    args.output = f"processed_{args.dataset}.csv" if args.output is None else args.output
-    df = collect_entries(args.dir, args.dataset)
+    args.output = f"processed_{args.dataset}.csv" if args.output is None else args.output    
+    if args.dataset == "bindingnet_v1_v2":
+        df = collect_entries(args.dir, args.dataset)
+    else:
+        df = collect_entries(args.dir[0], args.dataset)
     df['split'] = ''  # We will assign the split later
     
     # 2. Filter the dataset
@@ -627,13 +699,14 @@ def main():
         print(f"Dropped {len(to_drop)} entries from that were also present in dataset {os.path.basename(args.csv_filter)}.")
 
     # 2.2. Drop entries with rare elements in the ligand
-    df['atom_types'] = df['ligand_path'].apply(lambda x: utils.get_atom_types_from_sdf(x))
+    df['atom_types'] = utils.get_atom_types_from_sdf_parallelized(df['ligand_path'].tolist())
     allowed_elements = set(['F', 'N', 'Cl', 'O', 'Br', 'C', 'B', 'P', 'I', 'S'])
     mask_uncommon = df['atom_types'].apply(lambda x: not set(x).issubset(allowed_elements))
     to_drop = df[mask_uncommon].copy()
     to_drop['reason'] = 'Rare elements in ligand'
     dropped_df = pd.concat([dropped_df, to_drop])
     df = df[~mask_uncommon]
+    df = df.drop(columns=['atom_types'])
     print(f"Dropped {len(to_drop)} entries with rare elements in the ligand.")
 
     # 2.3. Drop entries with high similarity to the reference dataset
