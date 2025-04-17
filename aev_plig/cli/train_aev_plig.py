@@ -12,8 +12,8 @@ import pandas as pd
 import torch.nn as nn
 from tqdm import tqdm
 from torch_geometric.loader import DataLoader
-from aev_plig import utils
-from aev_plig.helpers import rmse, pearson, model_dict
+from aev_plig import utils, calc_metrics
+from aev_plig.model import GATv2Net
 
 
 def initialize(args):
@@ -157,10 +157,9 @@ def train(model, device, train_loader, optimizer, epoch, loss_fn):
     loss : float
         The average loss over the training dataset.
     """
-    log_interval = 100
     model.train()
     total_loss = 0.0
-    for batch_idx, data in enumerate(train_loader):
+    for batch_idx, data in tqdm(enumerate(train_loader), desc="Iterating", unit=" batch", total=len(train_loader), file=sys.__stderr__, leave=False, position=1):
         data = data.to(device)
         optimizer.zero_grad()
         output = model(data)
@@ -170,7 +169,6 @@ def train(model, device, train_loader, optimizer, epoch, loss_fn):
         total_loss += (loss.item()*len(data.y))
 
     loss = total_loss / len(train_loader.dataset)
-    print(f"\n  Validation loss of epoch {epoch}: {loss:.4f}")
 
     return loss
 
@@ -204,13 +202,13 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
     """
     best_pc = -1.1
     pcs = []
-    for epoch in tqdm(range(n_epochs), desc="Training", unit="epoch", file=sys.__stderr__):
+    for epoch in tqdm(range(n_epochs), desc="\nTraining", unit="epoch", total=n_epochs, file=sys.__stderr__, position=0):
     
-        _ = train(model, device, train_loader, optimizer, epoch + 1, loss_fn)
+        loss = train(model, device, train_loader, optimizer, epoch + 1, loss_fn)
         
         y_true, y_label = predict(model, device, valid_loader, y_scaler)
 
-        current_pc = pearson(y_true, y_label)
+        current_pc = calc_metrics.calc_pearson(y_true, y_label)
         pcs.append(current_pc)
         
         low = np.maximum(epoch-7,0)
@@ -219,7 +217,9 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
             torch.save(model.state_dict(), os.path.join(model_output_dir, model_file_name))
             best_pc = avg_pc  
 
-        print(f'  Current Pearson correlation coefficient: {current_pc}')
+        print(f'\n  ✅ Completed epoch {epoch + 1}/{n_epochs}')
+        print(f'    - Validation loss (MSE): {loss:.7f}')
+        print(f'    - Pearson correlation coefficient: {current_pc:.7f}')
 
 
 def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, act_fn, seeds):
@@ -251,9 +251,6 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
     else:
         print("GPU is NOT available")
         device = torch.device("cpu")
-
-    modeling = model_dict['GATv2Net']
-    model_st = modeling.__name__
     
     timestr = time.strftime("%Y%m%d-%H%M%S")
     model_output_dir = os.path.abspath(os.path.join("output", "trained_models"))
@@ -267,11 +264,8 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
     print(f"The number of edge features: {train_data.num_edge_features}")
 
     for i, seed in enumerate(seeds):
-        print(f'\nTraining a {model_st} model {i + 1} with seed {seed} ...')
+        print(f'\n🏋️ Training model {i + 1}/{len(seeds)} with seed {seed} ...')
         utils.set_seed(seed)
-        
-        model_file_name = f'{timestr}_model_{model_st}_{prefix}_{i}.model'
-
         train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
         valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
         test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
@@ -285,7 +279,8 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
             n_heads=n_heads,
             act_fn=act_fn
         )
-        model = modeling(
+
+        model = GATv2Net(
             node_feature_dim=train_data.num_node_features,
             edge_feature_dim=train_data.num_edge_features,
             config=config
@@ -296,6 +291,7 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
         loss_fn = nn.MSELoss()
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     
+        model_file_name = f'{timestr}_model_{GATv2Net.__name__}_{prefix}_{i}.model'
         model.to(device)
         _train(
             model=model,
@@ -310,8 +306,8 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
             model_file_name=model_file_name
         )
         
+        print(f'\nFinished training model {i + 1}! 🍺🍺🍺')
         model.load_state_dict(torch.load(os.path.join(model_output_dir, model_file_name)))
-        
         y_true, y_pred = predict(model, device, test_loader, train_data.y_scaler)
 
         if i == 0:
@@ -319,19 +315,19 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
         
         col = 'preds_' + str(i)
         df_test[col] = y_pred
-        print(f"Test Pearson correlation for model {i + 1}: {pearson(y_true, y_pred)}")
+        print(f"Test Pearson correlation for model {i + 1}: {calc_metrics.calc_pearson(y_true, y_pred)}")
     
     df_test['preds'] = df_test.iloc[:,1:].mean(axis=1)
 
-    scaler_file = f'output/trained_models/{timestr}_model_{model_st}_{prefix}.pickle'    
+    scaler_file = f'output/trained_models/{timestr}_model_{GATv2Net.__name__}_{prefix}.pickle'    
     with open(scaler_file,'wb') as f:
         pickle.dump(train_data.y_scaler, f)
     
     print(df_test.max())
     test_preds = np.array(df_test['preds'])
     test_truth = np.array(df_test['truth'])
-    test_ens_pc = pearson(test_truth, test_preds)
-    test_ens_rmse = rmse(test_truth, test_preds)
+    test_ens_pc = calc_metrics.calc_pearson(test_truth, test_preds)
+    test_ens_rmse = calc_metrics.calc_rmse(test_truth, test_preds)
     print("Ensemble test PC:", test_ens_pc)
     print("Ensemble test RMSE:", test_ens_rmse)
 

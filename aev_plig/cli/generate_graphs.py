@@ -163,7 +163,6 @@ def LoadPDBasDF(PDB, atom_keys):
     if list(df["ATOM_TYPE"].isna()).count(True) > 0:
         print("WARNING: Protein contains unsupported atom types. Only supported atom-type pairs are counted.")
    
-    print(df)
     return df
 
 
