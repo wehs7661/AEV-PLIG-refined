@@ -42,8 +42,6 @@ class GATv2Net(torch.nn.Module):
         self.bn_connect3 = nn.BatchNorm1d(256)
         self.out = nn.Linear(256, 1)
 
-
-
     def forward(self, data):
         x, edge_index, edge_attr, batch = data.x, data.edge_index, data.edge_attr, data.batch
 
@@ -66,5 +64,3 @@ class GATv2Net(torch.nn.Module):
         x = self.bn_connect3(x)
         return self.out(x)
 
-
-    
