@@ -189,4 +189,4 @@ def main():
         split_ids, split_y = list(df_split['system_id']), list(df_split['pK'])
         split_data = utils.GraphDataset(root='data', dataset=f'{args.prefix}_{split}', ids=split_ids, y=split_y, graphs_dict=graphs_dict)
 
-    print(f"\nElapsed time: {utils.format_time(time.time() - t0)}")
+    print(f"Elapsed time: {utils.format_time(time.time() - t0)}")

@@ -1,69 +1,9 @@
-import os
 import sys
 import numpy as np
-import pandas as pd
 from tqdm import tqdm
-from rdkit import Chem
+from scipy import stats
 from rdkit.DataStructs import BulkTanimotoSimilarity
-from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
-from multiprocessing import Pool, cpu_count
 
-
-def generate_fingerprint(sdf_file):
-    """
-    Process a single SDF file path to generate its ligand fingerprint.
-    
-    Parameters
-    ----------
-    sdf_file : str
-        Path to the SDF file.
-    
-    Returns
-    -------
-    fingerprint : rdkit.DataStructs.cDataStructs.ULongSparseIntVect
-        The generated fingerprint for the ligand in the SDF file.
-    """
-    fp_gen = GetMorganGenerator(radius=3)
-    suppl = Chem.SDMolSupplier(sdf_file, removeHs=True)
-    lig = suppl[0]
-    if lig is None:
-        print(f"Warning: RDKit returned None for {sdf_file}. Skipping ...")
-        return None
-    fingerprint = fp_gen.GetSparseCountFingerprint(lig)
-    return fingerprint
-
-
-def generate_fingerprints_parallelized(df, col_name):
-    """
-    Generate fingerprints for ligands in a pandas DataFrame using parallel processing.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The DataFrame containing the ligand data.
-    col_name : str
-        The name of the column in the DataFrame that contains the SDF file paths.
-    
-    Returns
-    -------
-    fingerprints : list
-        A list of generated fingerprints for each ligand in the DataFrame.
-    valid_indices : list
-        A list of indices for which the fingerprints were successfully generated.
-    """
-    sdf_paths = df[col_name].tolist()
-    with Pool(initializer=lambda: os.sched_setaffinity(0, set(range(cpu_count())))) as pool:
-        results = list(tqdm(pool.imap(generate_fingerprint, sdf_paths),
-                            total=len(sdf_paths),
-                            file=sys.__stderr__,
-                            desc="Generating fingerprints"))
-    fingerprints, valid_indices = [], []
-    for index, fingerprint in enumerate(results):
-        if fingerprint is not None:
-            fingerprints.append(fingerprint)
-            valid_indices.append(index)
-    
-    return fingerprints, valid_indices
 
 def calc_max_tanimoto_similarity(fps1, fps2):
     """
@@ -90,3 +30,144 @@ def calc_max_tanimoto_similarity(fps1, fps2):
     max_similarities = max_similarities.max(axis=1)
 
     return max_similarities
+
+
+def calc_RMSE(y_pred, y_true):
+    """
+    Calculate the root mean square error (RMSE) between two sets of values.
+    
+    Parameters
+    ----------
+    y_pred : np.ndarray
+        The predicted values.
+    y_true : np.ndarray
+        The true values.
+    
+    Returns
+    -------
+    rmse : float
+        The RMSE value.
+    """
+    rmse = np.sqrt(np.mean((y_pred - y_true) ** 2))
+    return rmse
+
+
+def calc_MSE(y_pred, y_true):
+    """
+    Calculate the mean square error (MSE) between two sets of values.
+    
+    Parameters
+    ----------
+    y_pred : np.ndarray
+        The predicted values.
+    y_true : np.ndarray
+        The true values.
+    
+    Returns
+    -------
+    mse : float
+        The MSE value.
+    """
+    mse = np.mean((y_pred - y_true) ** 2)
+    return mse
+
+def calc_pearson(y_pred, y_true):
+    """
+    Calculate the Pearson correlation coefficient (PCC) between two sets of values.
+    
+    Parameters
+    ----------
+    y_pred : np.ndarray
+        The predicted values.
+    y_true : np.ndarray
+        The true values.
+    
+    Returns
+    -------
+    pcc : float
+        The PCC value.
+    """
+    pcc = np.corrcoef(y_pred, y_true)[0, 1]
+    return pcc
+
+
+def calc_spearman(y_pred, y_true):
+    """
+    Calculate the Spearman rank correlation coefficient between two sets of values.
+    
+    Parameters
+    ----------
+    y_pred : np.ndarray
+        The predicted values.
+    y_true : np.ndarray
+        The true values.
+    
+    Returns
+    -------
+    spearman : float
+        The Spearman rank correlation coefficient.
+    """
+    spearman = stats.spearmanr(y_pred, y_true)[0]
+    return spearman
+
+
+def calc_kendall(y_pred, y_true):
+    """
+    Calculate the Kendall rank correlation coefficient between two sets of values.
+    
+    Parameters
+    ----------
+    y_pred : np.ndarray
+        The predicted values.
+    y_true : np.ndarray
+        The true values.
+    
+    Returns
+    -------
+    kendall : float
+        The Kendall rank correlation coefficient.
+    """
+    kendall = stats.kendalltau(y_pred, y_true)[0]
+    return kendall
+
+
+def calc_c_index(y_pred, y_true):
+    """
+    Calculate the concordance index (C-index) between two sets of values.
+    
+    Parameters
+    ----------
+    y_pred : np.ndarray
+        The predicted values.
+    y_true : np.ndarray
+        The true values.
+    
+    Returns
+    -------
+    c_index : float
+        The C-index value.
+    """
+    ind = np.argsort(y)
+    y = y[ind]
+    f = f[ind]
+    i = len(y)-1
+    j = i-1
+    z = 0.0
+    S = 0.0
+
+    while i > 0:
+        while j >= 0:
+            if y[i] > y[j]:
+                z = z + 1
+                u = f[i] - f[j]
+                if u > 0:
+                    S = S + 1
+                elif u == 0:
+                    S = S + 0.5
+            j = j - 1
+        i = i - 1
+        j = i-1
+
+    c_index = S / z
+    return c_index
+
