@@ -32,7 +32,7 @@ def calc_max_tanimoto_similarity(fps1, fps2):
     return max_similarities
 
 
-def calc_RMSE(y_pred, y_true):
+def calc_rmse(y_pred, y_true):
     """
     Calculate the root mean square error (RMSE) between two sets of values.
     
@@ -52,7 +52,7 @@ def calc_RMSE(y_pred, y_true):
     return rmse
 
 
-def calc_MSE(y_pred, y_true):
+def calc_mse(y_pred, y_true):
     """
     Calculate the mean square error (MSE) between two sets of values.
     

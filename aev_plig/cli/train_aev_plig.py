@@ -14,6 +14,7 @@ from tqdm import tqdm
 from torch_geometric.loader import DataLoader
 from aev_plig import utils, calc_metrics
 from aev_plig.model import GATv2Net
+from aev_plig import nn_utils
 
 
 def initialize(args):
@@ -91,6 +92,13 @@ def initialize(args):
         default='train_aev_plig.log',
         help='The path to the log file. The default is train_aev_plig.log.'
     )
+    parser.add_argument(
+        '-o',
+        '--output_dir',
+        type=str,
+        default='outputs',
+        help='The directory to save the trained models and analysis files. The default is outputs.'
+    )
 
     args = parser.parse_args(args)
     return args
@@ -133,7 +141,7 @@ def predict(model, device, loader, y_scaler=None):
     return y_true, y_pred
 
 
-def train(model, device, train_loader, optimizer, epoch, loss_fn):
+def train(model, device, train_loader, optimizer, loss_fn):
     """
     Trains the model for one epoch on the training dataset.
 
@@ -147,8 +155,6 @@ def train(model, device, train_loader, optimizer, epoch, loss_fn):
         The data loader for the training dataset.
     optimizer : torch.optim.Optimizer
         The optimizer to use for updating model parameters
-    epoch : int
-        The current epoch number (1-indexed).
     loss_fn : torch.nn.Module
         The loss function to use for training.
 
@@ -173,7 +179,7 @@ def train(model, device, train_loader, optimizer, epoch, loss_fn):
     return loss
 
 
-def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epochs, y_scaler, model_output_dir, model_file_name):
+def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epochs, y_scaler, model_path):
     """
     Trains the model over multiple epochs, validates, and saves the best model.
 
@@ -195,16 +201,14 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
         The number of epochs to train for.
     y_scaler : sklearn.preprocessing.StandardScaler
         The scaler to inverse-transform predictions.
-    model_output_dir : str
-        The directory to save model checkpoints.
-    model_file_name : str
-        The filename for the saved model.
+    model_path : str
+        The path to save the trained model.
     """
     best_pc = -1.1
     pcs = []
     for epoch in tqdm(range(n_epochs), desc="\nTraining", unit="epoch", total=n_epochs, file=sys.__stderr__, position=0):
     
-        loss = train(model, device, train_loader, optimizer, epoch + 1, loss_fn)
+        loss = train(model, device, train_loader, optimizer, loss_fn)
         
         y_true, y_label = predict(model, device, valid_loader, y_scaler)
 
@@ -214,7 +218,7 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
         low = np.maximum(epoch-7,0)
         avg_pc = np.mean(pcs[low:epoch+1])
         if(avg_pc > best_pc):
-            torch.save(model.state_dict(), os.path.join(model_output_dir, model_file_name))
+            torch.save(model.state_dict(), model_path)
             best_pc = avg_pc  
 
         print(f'\n  ✅ Completed epoch {epoch + 1}/{n_epochs}')
@@ -222,7 +226,7 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
         print(f'    - Pearson correlation coefficient: {current_pc:.7f}')
 
 
-def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, act_fn, seeds):
+def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, act_fn, seeds, output_dir):
     """
     Trains a GATv2Net model on graph data with multiple seeds and evaluates the ensemble.
 
@@ -244,18 +248,13 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
         Activation function name.
     seeds : list of int
         List of random seeds for training multiple models.
+    output_dir : str
+        Directory to save the trained models.
     """
-    if(torch.cuda.is_available()):
-        print("GPU is available")
-        device = torch.device("cuda")
-    else:
-        print("GPU is NOT available")
-        device = torch.device("cpu")
-    
+    device = nn_utils.get_device()
     timestr = time.strftime("%Y%m%d-%H%M%S")
-    model_output_dir = os.path.abspath(os.path.join("output", "trained_models"))
-    if not os.path.exists(model_output_dir):
-        os.makedirs(model_output_dir)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
     
     train_data = utils.GraphDataset(root='data', dataset=f'{prefix}_train', y_scaler=None)
     valid_data = utils.GraphDataset(root='data', dataset=f'{prefix}_validation', y_scaler=train_data.y_scaler)
@@ -292,6 +291,7 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     
         model_file_name = f'{timestr}_model_{GATv2Net.__name__}_{prefix}_{i}.model'
+        model_path = os.path.join(output_dir, model_file_name)
         model.to(device)
         _train(
             model=model,
@@ -302,12 +302,11 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
             optimizer=optimizer,
             n_epochs=n_epochs,
             y_scaler=train_data.y_scaler,
-            model_output_dir=model_output_dir,
-            model_file_name=model_file_name
+            model_path=model_path
         )
         
         print(f'\nFinished training model {i + 1}! 🍺🍺🍺')
-        model.load_state_dict(torch.load(os.path.join(model_output_dir, model_file_name)))
+        model.load_state_dict(torch.load(model_path))
         y_true, y_pred = predict(model, device, test_loader, train_data.y_scaler)
 
         if i == 0:
@@ -319,11 +318,10 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
     
     df_test['preds'] = df_test.iloc[:,1:].mean(axis=1)
 
-    scaler_file = f'output/trained_models/{timestr}_model_{GATv2Net.__name__}_{prefix}.pickle'    
+    scaler_file = os.path.join(output_dir, f'{timestr}_model_{GATv2Net.__name__}_{prefix}.pickle')   
     with open(scaler_file,'wb') as f:
         pickle.dump(train_data.y_scaler, f)
     
-    print(df_test.max())
     test_preds = np.array(df_test['preds'])
     test_truth = np.array(df_test['truth'])
     test_ens_pc = calc_metrics.calc_pearson(test_truth, test_preds)
@@ -353,6 +351,7 @@ def main():
         hidden_dim=args.hidden_dim,
         n_heads=args.n_heads,
         act_fn=args.act_fn,
-        seeds=args.seeds
+        seeds=args.seeds,
+        output_dir=args.output_dir
     )
     print(f"\nElapsed time: {utils.format_time(time.time() - t0)}")
