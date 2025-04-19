@@ -113,7 +113,7 @@ def calc_spearman(y_pred, y_true):
 
 def calc_kendall(y_pred, y_true):
     """
-    Calculate the Kendall rank correlation coefficient between two sets of values.
+    Calculate the Kendall's tau correlation coefficient between two sets of values.
     
     Parameters
     ----------
@@ -147,9 +147,9 @@ def calc_c_index(y_pred, y_true):
     c_index : float
         The C-index value.
     """
-    ind = np.argsort(y)
-    y = y[ind]
-    f = f[ind]
+    ind = np.argsort(y_true)
+    y = y_true[ind]
+    f = y_pred[ind]
     i = len(y)-1
     j = i-1
     z = 0.0
