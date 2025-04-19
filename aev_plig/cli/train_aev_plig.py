@@ -141,7 +141,7 @@ def predict(model, device, loader, y_scaler=None):
     return y_true, y_pred
 
 
-def train(model, device, train_loader, optimizer, loss_fn):
+def train_one_epoch(model, device, train_loader, optimizer, loss_fn):
     """
     Trains the model for one epoch on the training dataset.
 
@@ -208,7 +208,7 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
     pcs = []
     for epoch in tqdm(range(n_epochs), desc="\nTraining", unit="epoch", total=n_epochs, file=sys.__stderr__, position=0):
     
-        loss = train(model, device, train_loader, optimizer, loss_fn)
+        loss = train_one_epoch(model, device, train_loader, optimizer, loss_fn)
         
         y_true, y_label = predict(model, device, valid_loader, y_scaler)
 
@@ -224,9 +224,11 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
         print(f'\n  ✅ Completed epoch {epoch + 1}/{n_epochs}')
         print(f'    - Validation loss (MSE): {loss:.7f}')
         print(f'    - Pearson correlation coefficient: {current_pc:.7f}')
+        print(f"    - Kendall's tau correlation coefficient: {calc_metrics.calc_kendall(y_true, y_label):.7f}")
+        print(f'    - Spearman correlation coefficient: {calc_metrics.calc_spearman(y_true, y_label):.7f}')
+        print(f'    - C-index: {calc_metrics.calc_c_index(y_true, y_label):.7f}')
 
-
-def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, act_fn, seeds, output_dir):
+def train_ensemble(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, act_fn, seeds, output_dir):
     """
     Trains a GATv2Net model on graph data with multiple seeds and evaluates the ensemble.
 
@@ -314,7 +316,12 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
         
         col = 'preds_' + str(i)
         df_test[col] = y_pred
-        print(f"Test Pearson correlation for model {i + 1}: {calc_metrics.calc_pearson(y_true, y_pred)}")
+
+        print(f"  - Test RMSE: {calc_metrics.calc_rmse(y_true, y_pred)}")
+        print(f"  - Test Pearson correlation: {calc_metrics.calc_pearson(y_true, y_pred)}")
+        print(f"  - Test Kendall's tau correlation: {calc_metrics.calc_kendall(y_true, y_pred)}")
+        print(f"  - Test Spearman correlation: {calc_metrics.calc_spearman(y_true, y_pred)}")
+        print(f"  - Test C-index: {calc_metrics.calc_c_index(y_true, y_pred)}")
     
     df_test['preds'] = df_test.iloc[:,1:].mean(axis=1)
 
@@ -326,9 +333,13 @@ def train_NN(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, a
     test_truth = np.array(df_test['truth'])
     test_ens_pc = calc_metrics.calc_pearson(test_truth, test_preds)
     test_ens_rmse = calc_metrics.calc_rmse(test_truth, test_preds)
-    print("Ensemble test PC:", test_ens_pc)
-    print("Ensemble test RMSE:", test_ens_rmse)
-
+    section_str = "\nTest results for the ensemble model"
+    print(section_str + "\n" + "=" * (len(section_str) - 1))
+    print(f"RMSE: {test_ens_rmse}")
+    print(f"Pearson correlation: {test_ens_pc}")
+    print(f"Kendall's tau correlation: {calc_metrics.calc_kendall(test_truth, test_preds)}")
+    print(f"Spearman correlation: {calc_metrics.calc_spearman(test_truth, test_preds)}")
+    print(f"C-index: {calc_metrics.calc_c_index(test_truth, test_preds)}")
 
 def main():
     t0 = time.time()
@@ -343,7 +354,7 @@ def main():
     print(f"Current working directory: {os.getcwd()}")
     print(f"Current time: {datetime.datetime.now()}")
 
-    train_NN(
+    train_ensemble(
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         n_epochs=args.n_epochs,
