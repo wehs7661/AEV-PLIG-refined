@@ -8,7 +8,7 @@ import argparse
 import datetime
 import aev_plig
 import pandas as pd
-from aev_plig import utils
+from aev_plig import utils, nn_utils
 
 
 def initialize(args):
@@ -187,6 +187,6 @@ def main():
         
         df_split = data[data['split'] == split]
         split_ids, split_y = list(df_split['system_id']), list(df_split['pK'])
-        split_data = utils.GraphDataset(root='data', dataset=f'{args.prefix}_{split}', ids=split_ids, y=split_y, graphs_dict=graphs_dict)
+        split_data = nn_utils.GraphDataset(root='data', dataset=f'{args.prefix}_{split}', ids=split_ids, y=split_y, graphs_dict=graphs_dict)
 
     print(f"Elapsed time: {utils.format_time(time.time() - t0)}")
