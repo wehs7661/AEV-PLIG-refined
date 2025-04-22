@@ -698,7 +698,7 @@ def main():
         print(f"Dropped {len(to_drop)} entries from that were also present in dataset {os.path.basename(args.csv_filter)}.")
 
     # 2.2. Drop entries with rare elements in the ligand
-    df['atom_types'] = utils.get_atom_types_from_sdf_parallelized(df['ligand_path'].tolist())
+    df['atom_types'] = chem_utils.get_atom_types_from_sdf_parallelized(df['ligand_path'].tolist())
     allowed_elements = set(['F', 'N', 'Cl', 'O', 'Br', 'C', 'B', 'P', 'I', 'S'])
     mask_uncommon = df['atom_types'].apply(lambda x: not set(x).issubset(allowed_elements))
     to_drop = df[mask_uncommon].copy()

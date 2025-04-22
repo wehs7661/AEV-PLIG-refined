@@ -7,6 +7,7 @@ import argparse
 import torchani
 import datetime
 import aev_plig
+import traceback
 import torchani_mod
 import numpy as np
 import pandas as pd
@@ -481,6 +482,7 @@ def process_row(args):
         return system_id, graph, False, False
     except ValueError as e:
         print(f"ValueError in system {system_id}: {str(e)}")
+        traceback.print_exc()
         return system_id, None, False, True
 
 

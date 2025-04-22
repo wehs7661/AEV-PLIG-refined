@@ -12,9 +12,8 @@ import pandas as pd
 import torch.nn as nn
 from tqdm import tqdm
 from torch_geometric.loader import DataLoader
-from aev_plig import utils, calc_metrics
 from aev_plig.model import GATv2Net
-from aev_plig import nn_utils
+from aev_plig import utils, nn_utils, calc_metrics
 
 
 def initialize(args):
@@ -258,15 +257,15 @@ def train_ensemble(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_he
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    train_data = utils.GraphDataset(root='data', dataset=f'{prefix}_train', y_scaler=None)
-    valid_data = utils.GraphDataset(root='data', dataset=f'{prefix}_validation', y_scaler=train_data.y_scaler)
-    test_data = utils.GraphDataset(root='data', dataset=f'{prefix}_test', y_scaler=train_data.y_scaler)
+    train_data = nn_utils.GraphDataset(root='data', dataset=f'{prefix}_train', y_scaler=None)
+    valid_data = nn_utils.GraphDataset(root='data', dataset=f'{prefix}_validation', y_scaler=train_data.y_scaler)
+    test_data = nn_utils.GraphDataset(root='data', dataset=f'{prefix}_test', y_scaler=train_data.y_scaler)
     print(f"Number of node features: {train_data.num_node_features}")
     print(f"The number of edge features: {train_data.num_edge_features}")
 
     for i, seed in enumerate(seeds):
         print(f'\n🏋️ Training model {i + 1}/{len(seeds)} with seed {seed} ...')
-        utils.set_seed(seed)
+        nn_utils.set_seed(seed)
         train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
         valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
         test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
@@ -286,7 +285,7 @@ def train_ensemble(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_he
             edge_feature_dim=train_data.num_edge_features,
             config=config
         )
-        model.apply(utils.init_weights)
+        model.apply(nn_utils.init_weights)
     
         weight_decay = 0
         loss_fn = nn.MSELoss()
@@ -317,11 +316,11 @@ def train_ensemble(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_he
         col = 'preds_' + str(i)
         df_test[col] = y_pred
 
-        print(f"  - Test RMSE: {calc_metrics.calc_rmse(y_true, y_pred)}")
-        print(f"  - Test Pearson correlation: {calc_metrics.calc_pearson(y_true, y_pred)}")
-        print(f"  - Test Kendall's tau correlation: {calc_metrics.calc_kendall(y_true, y_pred)}")
-        print(f"  - Test Spearman correlation: {calc_metrics.calc_spearman(y_true, y_pred)}")
-        print(f"  - Test C-index: {calc_metrics.calc_c_index(y_true, y_pred)}")
+        print(f"  - Test RMSE: {calc_metrics.calc_rmse(y_true, y_pred):.7f}")
+        print(f"  - Test Pearson correlation: {calc_metrics.calc_pearson(y_true, y_pred):.7f}")
+        print(f"  - Test Kendall's tau correlation: {calc_metrics.calc_kendall(y_true, y_pred):.7f}")
+        print(f"  - Test Spearman correlation: {calc_metrics.calc_spearman(y_true, y_pred):.7f}")
+        print(f"  - Test C-index: {calc_metrics.calc_c_index(y_true, y_pred):.7f}")
     
     df_test['preds'] = df_test.iloc[:,1:].mean(axis=1)
 
@@ -335,11 +334,11 @@ def train_ensemble(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_he
     test_ens_rmse = calc_metrics.calc_rmse(test_truth, test_preds)
     section_str = "\nTest results for the ensemble model"
     print(section_str + "\n" + "=" * (len(section_str) - 1))
-    print(f"RMSE: {test_ens_rmse}")
-    print(f"Pearson correlation: {test_ens_pc}")
-    print(f"Kendall's tau correlation: {calc_metrics.calc_kendall(test_truth, test_preds)}")
-    print(f"Spearman correlation: {calc_metrics.calc_spearman(test_truth, test_preds)}")
-    print(f"C-index: {calc_metrics.calc_c_index(test_truth, test_preds)}")
+    print(f"RMSE: {test_ens_rmse:.7f}")
+    print(f"Pearson correlation: {test_ens_pc:.7f}")
+    print(f"Kendall's tau correlation: {calc_metrics.calc_kendall(test_truth, test_preds):.7f}")
+    print(f"Spearman correlation: {calc_metrics.calc_spearman(test_truth, test_preds):.7f}")
+    print(f"C-index: {calc_metrics.calc_c_index(test_truth, test_preds):.7f}")
 
 def main():
     t0 = time.time()

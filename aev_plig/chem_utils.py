@@ -7,6 +7,44 @@ from multiprocessing import Pool, cpu_count
 from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
 
 
+def get_atom_types_from_sdf(sdf_file):
+    """
+    Get the atom types from an SDF file.
+
+    Parameters
+    ----------
+    sdf_file : str
+        Path to the SDF file.
+    
+    Returns
+    -------
+    atom_types : list
+        List of atom types.
+    """
+    suppl = Chem.SDMolSupplier(sdf_file)
+    atom_types = []
+    for mol in suppl:
+        if mol is not None:
+            for atom in mol.GetAtoms():
+                atom_types.append(atom.GetSymbol())
+    
+    atom_types = list(set(atom_types))
+    return atom_types
+
+
+def get_atom_types_from_sdf_parallelized(paths):
+    with mp.Pool(initializer=lambda:os.sched_setaffinity(0, set(range(mp.cpu_count())))) as pool:
+        results = list(
+            tqdm(
+                pool.imap(get_atom_types_from_sdf, paths),
+                total=len(paths),
+                desc="Getting atom types from SDF",
+                file=sys.__stderr__,
+            )
+        )
+    return results
+
+
 def generate_fingerprint(sdf_file):
     """
     Process a single SDF file path to generate its ligand fingerprint.
