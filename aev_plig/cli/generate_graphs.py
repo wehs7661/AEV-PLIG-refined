@@ -14,7 +14,7 @@ import pandas as pd
 import qcelemental as qcel
 from tqdm import tqdm
 from rdkit import Chem
-from aev_plig import utils
+from aev_plig.utils import utils
 from aev_plig.data import data_dir
 from multiprocessing import Pool, cpu_count
 

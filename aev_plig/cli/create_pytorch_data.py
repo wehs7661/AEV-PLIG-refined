@@ -8,7 +8,7 @@ import argparse
 import datetime
 import aev_plig
 import pandas as pd
-from aev_plig import utils, nn_utils
+from aev_plig.utils import utils, nn_utils
 
 
 def initialize(args):
@@ -67,80 +67,6 @@ def initialize(args):
     return args
 
 
-def parse_filter(filter_str):
-    """
-    Parse the filter string into column, operator, and value.
-    The filter string should be in the following format: <column> <operator> <value>.
-    For example: 'max_tanimoto_schrodinger < 0.9'.
-
-    Parameters
-    ----------
-    filter_str : str
-        The filter string to parse.
-    
-    Returns
-    -------
-    column : str
-        The column name to filter on.
-    operator : str
-        The operator to use for filtering. Supported operators are: <, <=, >, >=, ==, !=.
-    value : str or float
-        The value to compare against. This will be converted to a float if possible.
-    """
-    # This regex will capture: column, operator, and value.
-    pattern = r'(\w+)\s*(<=|>=|==|!=|<|>)\s*(.+)'
-    match = re.match(pattern, filter_str)
-    if not match:
-        raise ValueError(
-            f"Filter '{filter_str}' is not in the correct format. "
-            f"Expected format: <column> <operator> <value>. "
-            f"Example: 'max_tanimoto_schrodinger < 0.9'."
-        )
-    column, operator, value = match.groups()
-    # Convert value to a float if possible, else keep as string
-    try:
-        value = float(value)
-    except ValueError:
-        pass
-    return column, operator, value
-
-
-def apply_filter(df, column, operator, value):
-    """
-    Apply the filter to the DataFrame based on the column, operator, and value.
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The DataFrame to filter.
-    column : str
-        The column name to filter on.
-    operator : str
-        The operator to use for filtering. Supported operators are: <, <=, >, >=, ==, !=.
-    value : str or float
-        The value to compare against. This will be converted to a float if possible.
-    
-    Returns
-    -------
-    pd.DataFrame
-        The filtered DataFrame.
-    """
-    if operator == '<':
-        return df[df[column] < value]
-    elif operator == '>':
-        return df[df[column] > value]
-    elif operator == '<=':
-        return df[df[column] <= value]
-    elif operator == '>=':
-        return df[df[column] >= value]
-    elif operator == '==':
-        return df[df[column] == value]
-    elif operator == '!=':
-        return df[df[column] != value]
-    else:
-        raise ValueError(f"Unsupported operator: {operator}")
-
-
 def main():
     t0 = time.time()
     args = initialize(sys.argv[1:])
@@ -167,8 +93,8 @@ def main():
         csv_data = pd.read_csv(csv_file)
         if args.filters:
             for filter_str in args.filters:
-                column, operator, value = parse_filter(filter_str)
-                csv_data = apply_filter(csv_data, column, operator, value)
+                column, operator, value = utils.parse_filter(filter_str)
+                csv_data = utils.apply_filter(csv_data, column, operator, value)
         csv_data = csv_data[['system_id', 'pK', 'split']]
         
         data_to_merge.append(csv_data)

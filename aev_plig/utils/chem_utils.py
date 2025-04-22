@@ -33,7 +33,7 @@ def get_atom_types_from_sdf(sdf_file):
 
 
 def get_atom_types_from_sdf_parallelized(paths):
-    with mp.Pool(initializer=lambda:os.sched_setaffinity(0, set(range(mp.cpu_count())))) as pool:
+    with Pool(initializer=lambda:os.sched_setaffinity(0, set(range(cpu_count())))) as pool:
         results = list(
             tqdm(
                 pool.imap(get_atom_types_from_sdf, paths),

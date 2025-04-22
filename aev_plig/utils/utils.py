@@ -1,15 +1,14 @@
 import os
 import sys
+import torch
 import datetime
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import numpy as np
-from torch_geometric.data import InMemoryDataset, Data
-import torch
-from sklearn.preprocessing import StandardScaler
-from rdkit import Chem
 import multiprocessing as mp
 from tqdm import tqdm
+from rdkit import Chem
+
 
 class Logger:
     """
@@ -89,4 +88,75 @@ def format_time(t):
 
     return t_str
 
+def parse_filter(filter_str):
+    """
+    Parse the filter string into column, operator, and value.
+    The filter string should be in the following format: <column> <operator> <value>.
+    For example: 'max_tanimoto_schrodinger < 0.9'.
 
+    Parameters
+    ----------
+    filter_str : str
+        The filter string to parse.
+    
+    Returns
+    -------
+    column : str
+        The column name to filter on.
+    operator : str
+        The operator to use for filtering. Supported operators are: <, <=, >, >=, ==, !=.
+    value : str or float
+        The value to compare against. This will be converted to a float if possible.
+    """
+    # This regex will capture: column, operator, and value.
+    pattern = r'(\w+)\s*(<=|>=|==|!=|<|>)\s*(.+)'
+    match = re.match(pattern, filter_str)
+    if not match:
+        raise ValueError(
+            f"Filter '{filter_str}' is not in the correct format. "
+            f"Expected format: <column> <operator> <value>. "
+            f"Example: 'max_tanimoto_schrodinger < 0.9'."
+        )
+    column, operator, value = match.groups()
+    # Convert value to a float if possible, else keep as string
+    try:
+        value = float(value)
+    except ValueError:
+        pass
+    return column, operator, value
+
+
+def apply_filter(df, column, operator, value):
+    """
+    Apply the filter to the DataFrame based on the column, operator, and value.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The DataFrame to filter.
+    column : str
+        The column name to filter on.
+    operator : str
+        The operator to use for filtering. Supported operators are: <, <=, >, >=, ==, !=.
+    value : str or float
+        The value to compare against. This will be converted to a float if possible.
+    
+    Returns
+    -------
+    pd.DataFrame
+        The filtered DataFrame.
+    """
+    if operator == '<':
+        return df[df[column] < value]
+    elif operator == '>':
+        return df[df[column] > value]
+    elif operator == '<=':
+        return df[df[column] <= value]
+    elif operator == '>=':
+        return df[df[column] >= value]
+    elif operator == '==':
+        return df[df[column] == value]
+    elif operator == '!=':
+        return df[df[column] != value]
+    else:
+        raise ValueError(f"Unsupported operator: {operator}")

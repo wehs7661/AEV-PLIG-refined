@@ -13,7 +13,7 @@ import torch.nn as nn
 from tqdm import tqdm
 from torch_geometric.loader import DataLoader
 from aev_plig.model import GATv2Net
-from aev_plig import utils, nn_utils, calc_metrics
+from aev_plig.utils import utils, nn_utils, calc_metrics
 
 
 def initialize(args):
