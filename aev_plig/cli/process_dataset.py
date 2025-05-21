@@ -82,6 +82,16 @@ def initialize(args):
         help="The random seed for splitting the dataset. Default is None, in which case no random seed is used."
     )
     parser.add_argument(
+        "-f",
+        "--filters",
+        nargs='+',
+        type=str,
+        help="The filters to apply to the dataset before splitting it. The filters are in the format of \
+            'column_name operator value'. For example, 'max_tanimoto_schrodinger < 0.9' will filter out entries \
+            with column 'max_tanimoto_schrodinger' larger than 0.9. The operators include '<', '<=', '>', \
+            '>=', '==', and '!='."
+    )
+    parser.add_argument(
         "-o",
         "--output",
         type=str,
@@ -171,6 +181,18 @@ def main():
     dropped_df = pd.concat([dropped_df, to_drop])
     df = df.dropna()
     print(f"Dropped {len(to_drop)} entries with NaN values in any column.")
+
+    # 2.5. Apply user-defined filters, if any
+    if args.filters:
+        print(f"Applying user-defined filters ...")
+        for filter_str in args.filters:
+            column, operator, value = utils.parse_filter(filter_str)
+            original_df = df.copy()
+            df = utils.apply_filter(df, column, operator, value)
+            to_drop = original_df[~original_df.index.isin(df.index)].copy()
+            to_drop['reason'] = f"User-defined filter: {filter_str}"
+            dropped_df = pd.concat([dropped_df, to_drop])
+            print(f"Dropped {len(to_drop)} entries with filter '{filter_str}'.")
 
     print(f"Splitting the dataset ...")
     df = dataset.split_dataset(df, args.split, random_seed=args.random_seed)

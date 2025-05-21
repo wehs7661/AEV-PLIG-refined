@@ -1,6 +1,7 @@
 import sys
 import numpy as np
 from tqdm import tqdm
+from numba import njit
 from scipy import stats
 from rdkit.DataStructs import BulkTanimotoSimilarity
 
@@ -131,6 +132,7 @@ def calc_kendall(y_pred, y_true):
     return kendall
 
 
+@njit
 def calc_c_index(y_pred, y_true):
     """
     Calculate the concordance index (C-index) between two sets of values.
@@ -150,24 +152,17 @@ def calc_c_index(y_pred, y_true):
     ind = np.argsort(y_true)
     y = y_true[ind]
     f = y_pred[ind]
-    i = len(y)-1
-    j = i-1
-    z = 0.0
+    n = len(y)
     S = 0.0
+    z = 0.0
 
-    while i > 0:
-        while j >= 0:
+    for i in range(n):
+        for j in range(i):
             if y[i] > y[j]:
-                z = z + 1
-                u = f[i] - f[j]
-                if u > 0:
-                    S = S + 1
-                elif u == 0:
-                    S = S + 0.5
-            j = j - 1
-        i = i - 1
-        j = i-1
-
-    c_index = S / z
-    return c_index
+                z += 1
+                if f[i] > f[j]:
+                    S += 1
+                elif f[i] == f[j]:
+                    S += 0.5
+    return S / z if z > 0 else 0.0
 

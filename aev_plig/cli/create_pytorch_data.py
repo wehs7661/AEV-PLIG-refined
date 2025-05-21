@@ -38,9 +38,10 @@ def initialize(args):
         "--filters",
         nargs='+',
         type=str,
-        help="The filters to apply to the dataset. The filters are in the format of 'column_name operator value'.\
-            For example, 'max_tanimoto_schrodinger < 0.9' will filter out entries with maximum Tanimoto similarity\
-            to Schrodinger dataset less than 0.9. The operators include '<', '<=', '>', '>=', '==', and '!='."
+        help="The filters to apply to the dataset before splitting it. The filters are in the format of \
+            'column_name operator value'. For example, 'max_tanimoto_schrodinger < 0.9' will filter out entries \
+            with column 'max_tanimoto_schrodinger' larger than 0.9. The operators include '<', '<=', '>', \
+            '>=', '==', and '!='."
     )
     parser.add_argument(
         "-p",
