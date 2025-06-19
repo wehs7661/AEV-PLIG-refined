@@ -6,6 +6,60 @@ from scipy import stats
 from rdkit.DataStructs import BulkTanimotoSimilarity
 
 
+def calc_weighted_mean(values, weights):
+    """
+    Calculate the weighted mean of a set of values.
+    
+    Parameters
+    ----------
+    values : np.ndarray
+        The values to calculate the weighted mean for.
+    weights : np.ndarray
+        The weights corresponding to each value.
+    
+    Returns
+    -------
+    weighted_mean : float
+        The weighted mean of the values.
+    """
+    weighted_mean = np.sum(values * weights) / np.sum(weights)
+    return weighted_mean
+
+
+def calc_bootstrap_uncertainty(values, weights, n_iterations=10000):
+    """
+    Calculate the uncertainty of a weighted mean using bootstrapping.
+    
+    Parameters
+    ----------
+    values : np.ndarray
+        The values to calculate the uncertainty for.
+    weights : np.ndarray
+        The weights corresponding to each value.
+    n_iterations : int, optional
+        The number of bootstrap iterations to perform. Default is 10000.
+    
+    Returns
+    -------
+    ci_bounds : list
+        A list containing the lower and upper bounds of the 95% confidence interval for the weighted mean.
+    """
+    n = len(values)
+    bootstrap_means = np.zeros(n_iterations)
+    
+    for i in range(n_iterations):
+        indices = np.random.choice(np.arange(n), size=n, replace=True)
+        bootstrap_values = values[indices]
+        bootstrap_weights = weights[indices]
+        bootstrap_means[i] = calc_weighted_mean(bootstrap_values, bootstrap_weights)
+    
+    lower_bound = np.percentile(bootstrap_means, 2.5)
+    upper_bound = np.percentile(bootstrap_means, 97.5)
+    ci_bounds = (lower_bound, upper_bound)
+    
+    return ci_bounds
+
+
 def calc_max_tanimoto_similarity(fps1, fps2):
     """
     Given two sets of fingerprints, calculate the maximum Tanimoto similarity
@@ -72,7 +126,8 @@ def calc_mse(y_pred, y_true):
     mse = np.mean((y_pred - y_true) ** 2)
     return mse
 
-def calc_pearson(y_pred, y_true):
+
+def calc_pearson(y_pred, y_true, groups=None, n_min=10):
     """
     Calculate the Pearson correlation coefficient (PCC) between two sets of values.
     
@@ -82,15 +137,52 @@ def calc_pearson(y_pred, y_true):
         The predicted values.
     y_true : np.ndarray
         The true values.
+    groups : list of str, optional
+        A list of groups that correspond to each prediction/true value pair. If provided, the PCC will
+        be calculated for each group separately. And a weighted average of the PCCs will be returned
+        with uncertainty estimated by bootstrapping (half the 95% confidence interval).
+    n_min : int, optional
+        The minimum number of samples required in each group to calculate the PCC. If a group has fewer
+        samples than this, it will be skipped. Default is 10. This parameter is ignored if groups are not provided.
     
     Returns
     -------
     pcc : float
-        The PCC value.
+        The PCC value. If groups are provided, it will be the weighted average of the PCCs for each group.
+    uncertainty : float
+        The uncertainty of the weighted average PCC, estimated by bootstrapping. Only returned if groups are provided.
+    pcc_dict : dict
+        A dictionary with group names as keys and their corresponding PCC values as values. Only returned if groups are provided.
     """
-    pcc = np.corrcoef(y_pred, y_true)[0, 1]
-    return pcc
+    y_pred = np.array(y_pred)
+    y_true = np.array(y_true)
+    if groups is not None:
+        groups = np.array(groups)
+        unique_groups = np.unique(groups)
+        pcc_dict = {}
+        pcc_values, group_sizes = [], []
+        for group in unique_groups:
+            if np.sum(groups == group) < n_min:
+                continue
+            mask = groups == group
+            pcc = np.corrcoef(y_pred[mask], y_true[mask])[0, 1]
+            
+            pcc_values.append(pcc)
+            group_sizes.append(np.sum(mask))
+            pcc_dict[group] = pcc
+        
+        # Calculate weighted average PCC
+        pcc = calc_weighted_mean(np.array(pcc_values), np.array(group_sizes))
 
+        # Calculate uncertainty using bootstrapping
+        ci_bounds = calc_bootstrap_uncertainty(np.array(pcc_values), np.array(group_sizes))
+        uncertainty = (ci_bounds[1] - ci_bounds[0]) / 2
+    else:
+        pcc = np.corrcoef(y_pred, y_true)[0, 1]
+        uncertainty = None
+        pcc_dict = None
+
+    return pcc, uncertainty, pcc_dict
 
 def calc_spearman(y_pred, y_true):
     """
