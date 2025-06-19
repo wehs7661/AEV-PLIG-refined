@@ -100,6 +100,10 @@ def main():
         
         data_to_merge.append(csv_data)
     data = pd.concat(data_to_merge, ignore_index=True)
+
+    # Exclude entries that are not present in graphs_dict due to unreadiblity by RDKit
+    data = data[data['system_id'].isin(graphs_dict.keys())]
+
     print(f'\nNumber of training entries: {len(data[data["split"] == "train"])}')
     print(f'Number of validation entries: {len(data[data["split"] == "validation"])}')
     print(f'Number of test entries: {len(data[data["split"] == "test"])}')
