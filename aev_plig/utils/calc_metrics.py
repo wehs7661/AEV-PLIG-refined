@@ -207,6 +207,25 @@ class MetricCalculator:
         """
         return self._metric_by_group(lambda y_pred, y_true: (calc_c_index(y_pred, y_true), None))
 
+    def all_metrics(self):
+        """
+        Calculate all metrics (Pearson, Spearman, Kendall, MSE, RMSE, C-index) between the predicted and true values.
+        
+        Returns
+        -------
+        metrics : dict
+            A dictionary containing all calculated metrics.
+        """
+        metrics = {
+            'pearson': self.pearson(),
+            'spearman': self.spearman(),
+            'kendall': self.kendall(),
+            'mse': self.mse(),
+            'rmse': self.rmse(),
+            'c_index': self.c_index()
+        }
+        return metrics
+
 @njit
 def calc_c_index(y_pred, y_true):
     """

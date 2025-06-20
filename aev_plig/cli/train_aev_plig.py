@@ -316,11 +316,14 @@ def train_ensemble(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_he
         col = 'preds_' + str(i)
         df_test[col] = y_pred
 
-        print(f"  - Test RMSE: {calc_metrics.calc_rmse(y_true, y_pred):.7f}")
-        print(f"  - Test Pearson correlation: {calc_metrics.calc_pearson(y_true, y_pred):.7f}")
-        print(f"  - Test Kendall's tau correlation: {calc_metrics.calc_kendall(y_true, y_pred):.7f}")
-        print(f"  - Test Spearman correlation: {calc_metrics.calc_spearman(y_true, y_pred):.7f}")
-        print(f"  - Test C-index: {calc_metrics.calc_c_index(y_true, y_pred):.7f}")
+        metrics = calc_metrics.MetricCalculator(y_pred, y_true)
+        all_metrics = metrics.all_metrics()
+
+        print(f"  - Test RMSE: {all_metrics['rmse']:.7f}")
+        print(f"  - Test Pearson correlation: {all_metrics['pearson']:.7f}")
+        print(f"  - Test Kendall's tau correlation: {all_metrics['kendall']:.7f}")
+        print(f"  - Test Spearman correlation: {all_metrics['spearman']:.7f}")
+        print(f"  - Test C-index: {all_metrics[c_index]:.7f}")
     
     df_test['preds'] = df_test.iloc[:,1:].mean(axis=1)
 
@@ -330,15 +333,17 @@ def train_ensemble(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_he
     
     test_preds = np.array(df_test['preds'])
     test_truth = np.array(df_test['truth'])
-    test_ens_pc = calc_metrics.calc_pearson(test_truth, test_preds)
-    test_ens_rmse = calc_metrics.calc_rmse(test_truth, test_preds)
+
+    metrics = calc_metrics.MetricCalculator(test_preds, test_truth)
+    all_metrics = metrics.all_metrics()
+
     section_str = "\nTest results for the ensemble model"
     print(section_str + "\n" + "=" * (len(section_str) - 1))
-    print(f"RMSE: {test_ens_rmse:.7f}")
-    print(f"Pearson correlation: {test_ens_pc:.7f}")
-    print(f"Kendall's tau correlation: {calc_metrics.calc_kendall(test_truth, test_preds):.7f}")
-    print(f"Spearman correlation: {calc_metrics.calc_spearman(test_truth, test_preds):.7f}")
-    print(f"C-index: {calc_metrics.calc_c_index(test_truth, test_preds):.7f}")
+    print(f"RMSE: {all_metrics['rmse']:.7f}")
+    print(f"Pearson correlation: {all_metrics['pearson']:.7f}")
+    print(f"Kendall's tau correlation: {all_metrics['kendall']:.7f}")
+    print(f"Spearman correlation: {all_metrics['spearman']:.7f}")
+    print(f"C-index: {all_metrics['c_index']:.7f}")
 
 def main():
     t0 = time.time()
