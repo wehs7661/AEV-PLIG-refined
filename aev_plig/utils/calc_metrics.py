@@ -165,7 +165,7 @@ class MetricCalculator:
             ci_bounds = self.calc_bootstrap_uncertainty(np.array(metric_values), np.array(group_sizes))
             uncertainty = (ci_bounds[1] - ci_bounds[0]) / 2
         else:
-            metric = metric_func(self.y_pred, self.y_true)
+            metric = metric_func(self.y_pred, self.y_true)[0]
             uncertainty = None
             metric_dict = None
 
