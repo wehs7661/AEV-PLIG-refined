@@ -96,8 +96,11 @@ def main():
             for filter_str in args.filters:
                 column, operator, value = utils.parse_filter(filter_str)
                 csv_data = utils.apply_filter(csv_data, column, operator, value)
-        csv_data = csv_data[['system_id', 'pK', 'split']]
         
+        if 'group_id' not in csv_data.columns:
+            csv_data['group_id'] = None
+
+        csv_data = csv_data[['system_id', 'pK', 'split', 'group_id']]
         data_to_merge.append(csv_data)
     data = pd.concat(data_to_merge, ignore_index=True)
 
@@ -118,6 +121,7 @@ def main():
         
         df_split = data[data['split'] == split]
         split_ids, split_y = list(df_split['system_id']), list(df_split['pK'])
-        split_data = nn_utils.GraphDataset(root='data', dataset=f'{args.prefix}_{split}', ids=split_ids, y=split_y, graphs_dict=graphs_dict)
+        group_ids = list(df_split['group_id'])
+        split_data = nn_utils.GraphDataset(root='data', dataset=f'{args.prefix}_{split}', ids=split_ids, y=split_y, graphs_dict=graphs_dict, group_ids=group_ids)
 
     print(f"Elapsed time: {utils.format_time(time.time() - t0)}")

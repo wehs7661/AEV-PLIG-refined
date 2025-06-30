@@ -123,7 +123,10 @@ def predict(model, device, loader, y_scaler=None):
         The ground truth labels.
     y_pred : numpy.ndarray
         The predicted labels.
+    group_ids : list
+        The group IDs for each true value, if available. If not, an empty list will be returned.
     """
+    group_ids = []
     model.eval()
     total_preds = torch.Tensor()
     total_labels = torch.Tensor()
@@ -134,10 +137,13 @@ def predict(model, device, loader, y_scaler=None):
             output = model(data)
             total_preds = torch.cat((total_preds, output.cpu()), 0)
             total_labels = torch.cat((total_labels, data.y.view(-1, 1).cpu()), 0)
+            group_ids.extend([i.item() for i in data.group_id])  # it was a numpy array
 
     y_true = y_scaler.inverse_transform(total_labels.numpy().flatten().reshape(-1,1)).flatten()
     y_pred = y_scaler.inverse_transform(total_preds.detach().numpy().flatten().reshape(-1,1)).flatten()
-    return y_true, y_pred
+    if group_ids == [None] * len(y_true):
+        group_ids = None
+    return y_true, y_pred, group_ids
 
 
 def train_one_epoch(model, device, train_loader, optimizer, loss_fn):
@@ -209,10 +215,11 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
     
         loss = train_one_epoch(model, device, train_loader, optimizer, loss_fn)
         
-        y_true, y_label = predict(model, device, valid_loader, y_scaler)
+        y_true, y_label, group_ids = predict(model, device, valid_loader, y_scaler)
 
-        current_pc = calc_metrics.calc_pearson(y_true, y_label)
-        pcs.append(current_pc)
+        metrics = calc_metrics.MetricCalculator(y_label, y_true, group_ids)
+        all_metrics = metrics.all_metrics()
+        pcs.append(all_metrics['pearson'][0])
         
         low = np.maximum(epoch-7,0)
         avg_pc = np.mean(pcs[low:epoch+1])
@@ -222,10 +229,10 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
 
         print(f'\n  ✅ Completed epoch {epoch + 1}/{n_epochs}')
         print(f'    - Validation loss (MSE): {loss:.7f}')
-        print(f'    - Pearson correlation coefficient: {current_pc:.7f}')
-        print(f"    - Kendall's tau correlation coefficient: {calc_metrics.calc_kendall(y_true, y_label):.7f}")
-        print(f'    - Spearman correlation coefficient: {calc_metrics.calc_spearman(y_true, y_label):.7f}')
-        print(f'    - C-index: {calc_metrics.calc_c_index(y_true, y_label):.7f}')
+        print(f'    - Pearson correlation coefficient: {all_metrics['pearson'][0]:.7f}')
+        print(f"    - Kendall's tau correlation coefficient: {all_metrics['kendall'][0]:.7f}")
+        print(f'    - Spearman correlation coefficient: {all_metrics['spearman'][0]:.7f}')
+        print(f'    - C-index: {all_metrics['c_index'][0]:.7f}')
 
 def train_ensemble(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, act_fn, seeds, output_dir):
     """
@@ -308,7 +315,7 @@ def train_ensemble(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_he
         
         print(f'\nFinished training model {i + 1}! 🍺🍺🍺')
         model.load_state_dict(torch.load(model_path))
-        y_true, y_pred = predict(model, device, test_loader, train_data.y_scaler)
+        y_true, y_pred, group_ids = predict(model, device, test_loader, train_data.y_scaler)
 
         if i == 0:
             df_test = pd.DataFrame(data=y_true, index=range(len(y_true)), columns=['truth'])
@@ -316,14 +323,14 @@ def train_ensemble(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_he
         col = 'preds_' + str(i)
         df_test[col] = y_pred
 
-        metrics = calc_metrics.MetricCalculator(y_pred, y_true)
+        metrics = calc_metrics.MetricCalculator(y_pred, y_true, group_ids)
         all_metrics = metrics.all_metrics()
 
-        print(f"  - Test RMSE: {all_metrics['rmse']:.7f}")
-        print(f"  - Test Pearson correlation: {all_metrics['pearson']:.7f}")
-        print(f"  - Test Kendall's tau correlation: {all_metrics['kendall']:.7f}")
-        print(f"  - Test Spearman correlation: {all_metrics['spearman']:.7f}")
-        print(f"  - Test C-index: {all_metrics[c_index]:.7f}")
+        print(f"  - Test RMSE: {all_metrics['rmse'][0]:.7f} ± {all_metrics['rmse'][1]:.7f}")
+        print(f"  - Test Pearson correlation: {all_metrics['pearson'][0]:.7f} ± {all_metrics['pearson'][1]:.7f}")
+        print(f"  - Test Kendall's tau correlation: {all_metrics['kendall'][0]:.7f} ± {all_metrics['kendall'][1]:.7f}")
+        print(f"  - Test Spearman correlation: {all_metrics['spearman'][0]:.7f} ± {all_metrics['spearman'][1]:.7f}")
+        print(f"  - Test C-index: {all_metrics['c_index'][0]:.7f} ± {all_metrics['c_index'][1]:.7f}")
     
     df_test['preds'] = df_test.iloc[:,1:].mean(axis=1)
 
@@ -334,16 +341,16 @@ def train_ensemble(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_he
     test_preds = np.array(df_test['preds'])
     test_truth = np.array(df_test['truth'])
 
-    metrics = calc_metrics.MetricCalculator(test_preds, test_truth)
+    metrics = calc_metrics.MetricCalculator(test_preds, test_truth, group_ids)
     all_metrics = metrics.all_metrics()
 
     section_str = "\nTest results for the ensemble model"
     print(section_str + "\n" + "=" * (len(section_str) - 1))
-    print(f"RMSE: {all_metrics['rmse']:.7f}")
-    print(f"Pearson correlation: {all_metrics['pearson']:.7f}")
-    print(f"Kendall's tau correlation: {all_metrics['kendall']:.7f}")
-    print(f"Spearman correlation: {all_metrics['spearman']:.7f}")
-    print(f"C-index: {all_metrics['c_index']:.7f}")
+    print(f"RMSE: {all_metrics['rmse'][0]:.7f} ± {all_metrics['rmse'][1]:.7f}")
+    print(f"Pearson correlation: {all_metrics['pearson'][0]:.7f} ± {all_metrics['pearson'][1]:.7f}")
+    print(f"Kendall's tau correlation: {all_metrics['kendall'][0]:.7f} ± {all_metrics['kendall'][1]:.7f}")
+    print(f"Spearman correlation: {all_metrics['spearman'][0]:.7f} ± {all_metrics['spearman'][1]:.7f}")
+    print(f"C-index: {all_metrics['c_index'][0]:.7f} ± {all_metrics['c_index'][1]:.7f}")
 
 def main():
     t0 = time.time()
