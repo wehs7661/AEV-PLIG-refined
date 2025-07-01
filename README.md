@@ -123,8 +123,7 @@ cp {path_to_processed_bindingnet.csv} csv_files/ref_bindingnet.csv
 ```
 Then, we use the CLI `process_dataset` to generate the preprocessed datasets using the following commands:
 ```
-process_dataset -d {path_to_pdbbind} -ds pdbbind -r csv_files/ref_pdb
-bind.csv -o csv_files/processed_pdbbind.csv  -l log_files/process_pdbbind.log
+process_dataset -d {path_to_pdbbind} -ds pdbbind -r csv_files/ref_pdbbind.csv -o csv_files/processed_pdbbind.csv  -l log_files/process_pdbbind.log
 process_dataset -d {path_to_bindingnet_database} -ds bindingnet -r csv_files/ref_bindingnet.csv -o csv_files/processed_bindingnet.csv -l log_files/
 process_bindingnet.log
 ```
@@ -149,8 +148,7 @@ The script outputs the following files in *data/processed/*:
 *pdbbind_U_bindingnet_ligsim90_train.pt*, *pdbbind_U_bindingnet_ligsim90_valid.pt*, and *pdbbind_U_bindingnet_ligsim90_test.pt*
 
 #### Run training
-Running the following script takes 25 hours using a NVIDIA GeForce GTX 1080 Ti
-GPU. Once a model has been trained, the next section describes how to use it for predictions.
+Running the following script takes 25 hours using a NVIDIA GeForce GTX 1080 Ti GPU. Once a model has been trained, the next section describes how to use it for predictions.
 ```
 python training.py --activation_function=leaky_relu --batch_size=128 --dataset=pdbbind_U_bindingnet_ligsim90 --epochs=200 --head=3 --hidden_dim=256 --lr=0.00012291937615434127 --model=GATv2Net
 ```

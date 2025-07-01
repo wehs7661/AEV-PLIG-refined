@@ -229,10 +229,10 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
 
         print(f'\n  ✅ Completed epoch {epoch + 1}/{n_epochs}')
         print(f'    - Validation loss (MSE): {loss:.7f}')
-        print(f'    - Pearson correlation coefficient: {all_metrics['pearson'][0]:.7f}')
+        print(f"    - Pearson correlation coefficient: {all_metrics['pearson'][0]:.7f}")
         print(f"    - Kendall's tau correlation coefficient: {all_metrics['kendall'][0]:.7f}")
-        print(f'    - Spearman correlation coefficient: {all_metrics['spearman'][0]:.7f}')
-        print(f'    - C-index: {all_metrics['c_index'][0]:.7f}')
+        print(f"    - Spearman correlation coefficient: {all_metrics['spearman'][0]:.7f}")
+        print(f"    - C-index: {all_metrics['c_index'][0]:.7f}")
 
 def train_ensemble(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, act_fn, seeds, output_dir):
     """
