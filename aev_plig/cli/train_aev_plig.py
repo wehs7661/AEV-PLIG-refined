@@ -137,7 +137,10 @@ def predict(model, device, loader, y_scaler=None):
             output = model(data)
             total_preds = torch.cat((total_preds, output.cpu()), 0)
             total_labels = torch.cat((total_labels, data.y.view(-1, 1).cpu()), 0)
-            group_ids.extend([i.item() for i in data.group_id])  # it was a numpy array
+            if hasattr(data, 'group_id'):
+                group_ids.extend([i.item() for i in data.group_id])  # it was a numpy array
+            else:
+                group_ids.extend([None] * len(data.y))
 
     y_true = y_scaler.inverse_transform(total_labels.numpy().flatten().reshape(-1,1)).flatten()
     y_pred = y_scaler.inverse_transform(total_preds.detach().numpy().flatten().reshape(-1,1)).flatten()

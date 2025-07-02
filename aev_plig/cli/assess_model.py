@@ -34,7 +34,7 @@ def parse_command_line_arguments() -> argparse.Namespace:
     parser.add_argument(
         '-s', '--scaler_path',
         required=True,
-        help="Path to scaler pickle file from training, e.g. /home/foo.pickle"
+        help="Path to scaler pickle, e.g. /home/foo.pickle"
     )
     
     parser.add_argument(
@@ -47,19 +47,19 @@ def parse_command_line_arguments() -> argparse.Namespace:
     parser.add_argument(
         '-t', '--test_dataset',
         default='dataset_test',
-        help="Name of test dataset (defaults to 'dataset_test')"
+        help="Name of test dataset"
     )
 
     parser.add_argument(
         '-r', '--train_dataset',
         default='dataset_train',
-        help="Name of train dataset (defaults to 'dataset_train'). Train dataset is required for scaling the test data to have mean=0, stddev=1."
+        help="Name of train dataset. The train dataset is used for scaling the test data to have mean=0, stddev=1."
     )
 
     parser.add_argument(
         '-o', '--output_path',
         default='./assessment_results.csv',
-        help="Path for output CSV file containing results (defaults to working directory)"
+        help="Path for output CSV file containing results, defaults to working directory"
     )
 
     parser.add_argument(
@@ -200,42 +200,6 @@ def load_test_dataset(data_root: str, testset_name: str, trainset_name: str) -> 
         raise RuntimeError(f"Failed to load dataset info from {data_root}: {str(e)}")
 
 
-def calculate_performance_metrics(y_true: List[float], y_pred: List[float], 
-                                group_ids: List[str], logger: logging.Logger) -> Dict[str, float]:
-    """
-    Calculate comprehensive performance metrics for model assessment.
-    
-    Args:
-        y_true: True binding affinity values
-        y_pred: Predicted binding affinity values  
-        group_ids: Group identifiers for potential group-wise analysis
-        logger: Logger for metric reporting
-        
-    Returns:
-        Dictionary containing calculated metrics
-        
-    Raises:
-        RuntimeError: If metric calculation fails
-    """
-    logger.info("Calculating performance metrics...")
-    
-    try:
-        # Initialize metric calculator with prediction data
-        metrics_calc = calc_metrics.MetricCalculator(y_pred, y_true, group_ids)
-        
-        # Calculate primary performance metrics
-        metrics = {}
-        
-        # Correlation metrics - primary indicators of model performance
-        metrics['pearson_correlation'] = metrics_calc.pearson()
-        logger.info(f"Pearson correlation: {metrics['pearson_correlation']:.4f}")
-        
-        return metrics
-        
-    except Exception as e:
-        raise RuntimeError(f"Metrics calculation failed: {str(e)}")
-
-
 def save_results_to_csv(y_true: List[float], y_pred: List[float], group_ids: List[str],
                        metrics: Dict[str, float], output_path: str, logger: logging.Logger) -> None:
     """
@@ -328,7 +292,7 @@ def main():
         # Load test dataset first to get feature dimensions
         logger.info("Loading test dataset...")
         # We need to load with a dummy scaler first to get dimensions
-        test_data, _ = load_test_dataset(args.data_root, args.test_dataset, None)
+        test_data, _ = load_test_dataset(args.data_root, args.test_dataset, args.train_dataset)
         
         # Load trained model and scaler
         logger.info("Loading trained model...")
@@ -347,12 +311,16 @@ def main():
         logger.info("Running model assessment...")
         y_true, y_pred, group_ids = predict(model, device, test_loader, scaler)
         logger.info("Completed model assessment")
+        logger.info(f"True values range: {min(y_true):.4f} to {max(y_true):.4f}")
+        logger.info(f"Predicted values range: {min(y_pred):.4f} to {max(y_pred):.4f}")
         
         # Calculate performance metrics
-        metrics = calculate_performance_metrics(y_true, y_pred, group_ids, logger)
-        
+        #metrics = calculate_performance_metrics(y_true, y_pred, group_ids, logger)
+        metrics = calc_metrics.MetricCalculator(y_pred, y_true, group_ids)
+        print('Pearson correlation:', metrics.pearson())
+
         # Save results to CSV
-        #save_results_to_csv(y_true, y_pred, group_ids, metrics, args.output_path, logger)
+        save_results_to_csv(y_true, y_pred, group_ids, metrics, args.output_path, logger)
         
         logger.info("Model assessment completed successfully")
         
