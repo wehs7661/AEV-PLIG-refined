@@ -80,28 +80,31 @@ def load_trained_model(model_path: str, scaler_path: str, num_node_features: int
     """
     Load a pre-trained AEV-PLIG model and its associated scaler.
     
-    Args:
-        model_path: Path to the trained model file (.model extension)
-        scaler_path: Path to the scaler pickle file 
-        num_node_features: Number of node features in the graph data
-        num_edge_features: Number of edge features in the graph data
-        device: PyTorch device to load the model on
+    Parameters
+    ----------
+    model_path : str
+        Path to the trained model file (.model extension).
+    scaler_path : str  
+        Path to the scaler pickle file.
+    num_node_features : int
+        Number of node features in the graph data
+    num_edge_features : int
+        Number of edge features in the graph data
+    device : str
+        PyTorch device to load the model on. The values should be 'cpu' or 'cuda'.
         
-    Returns:
-        Tuple of (loaded model, loaded scaler)
-        
-    Raises:
-        FileNotFoundError: If model or scaler files don't exist
-        RuntimeError: If model loading fails
+    Returns
+    -------
+    model : GATv2Net
+        The loaded GATv2Net model with trained weights.
+    scaler : Any
+        The scaler used during training, typically a StandardScaler or similar.
     """
-    # Verify files exist before attempting to load
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found: {model_path}")
     if not os.path.exists(scaler_path):
         raise FileNotFoundError(f"Scaler file not found: {scaler_path}")
     
-    # Create model configuration - these should ideally be stored with the model
-    # For now, using default values that match the example
     config = argparse.Namespace(
         hidden_dim=256,
         n_heads=3,
@@ -116,56 +119,50 @@ def load_trained_model(model_path: str, scaler_path: str, num_node_features: int
     )
     
     # Load trained model weights
-    try:
-        model.load_state_dict(torch.load(model_path, map_location=device))
-        model.to(device)
-        model.eval()  # Set to evaluation mode
-    except Exception as e:
-        raise RuntimeError(f"Failed to load model from {model_path}: {str(e)}")
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.to(device)
+    model.eval()
     
-    # Load the scaler used during training
-    try:
-        with open(scaler_path, 'rb') as handle:
-            scaler = pickle.load(handle)
-    except Exception as e:
-        raise RuntimeError(f"Failed to load scaler from {scaler_path}: {str(e)}")
-    
+    with open(scaler_path, 'rb') as handle:
+        scaler = pickle.load(handle)
+
     return model, scaler
 
 def load_test_dataset(data_root: str, testset_name: str, trainset_name: str) -> Tuple[nn_utils.GraphDataset, DataLoader]:
     """
     Load test dataset and create DataLoader for model evaluation.
     
-    Args:
-        data_root: Root directory containing the dataset files
-        testset_name: Name of the test dataset
-        trainset_name: Name of the train dataset
+    Parameters
+    ----------
+    data_root : str
+        Root directory containing the dataset files.
+    testset_name : str
+        Name of the test dataset.
+    trainset_name : str
+        Name of the train dataset.
 
-    Returns:
-        Tuple of (test dataset, test data loader)
-        
-    Raises:
-        RuntimeError: If dataset loading fails
+    Returns
+    -------
+    test_data : nn_utils.GraphDataset
+        Loaded test dataset object.
+    test_loader : DataLoader
+        DataLoader for the test dataset, used for batching during evaluation.
     """
-    try:
-        train_data = nn_utils.GraphDataset(root=data_root, dataset=trainset_name, y_scaler=None)
+    train_data = nn_utils.GraphDataset(root=data_root, dataset=trainset_name, y_scaler=None)
 
-        test_data = nn_utils.GraphDataset(
-            root=data_root,
-            dataset=testset_name,
-            y_scaler=train_data.y_scaler
-        )
-        
-        test_loader = DataLoader(
-            test_data,
-            batch_size=128,
-            shuffle=False
-        )
-        
-        return test_data, test_loader
-        
-    except Exception as e:
-        raise RuntimeError(f"Failed to load dataset info from {data_root}: {str(e)}")
+    test_data = nn_utils.GraphDataset(
+        root=data_root,
+        dataset=testset_name,
+        y_scaler=train_data.y_scaler
+    )
+    
+    test_loader = DataLoader(
+        test_data,
+        batch_size=128,
+        shuffle=False
+    )
+    
+    return test_data, test_loader
 
 
 def save_results_to_csv(y_true: List[float], y_pred: List[float], group_ids: List[str],
@@ -178,60 +175,58 @@ def save_results_to_csv(y_true: List[float], y_pred: List[float], group_ids: Lis
     and overall performance metrics. This approach is more elegant than iterative
     writing as it allows for better data organization and atomic file operations.
     
-    Args:
-        y_true: True binding affinity values
-        y_pred: Predicted binding affinity values
-        group_ids: Group/complex identifiers
-        metrics: Dictionary of calculated performance metrics
-        output_path: Path where CSV file should be saved
-        
-    Raises:
-        RuntimeError: If CSV writing fails
+    Parameters
+    ----------
+    y_true : list
+        True binding affinity values.
+    y_pred :
+        Predicted binding affinity values.
+    group_ids :
+        Group identifiers for the complexes, e.g., protein family names.
+    metrics : dict
+        Dictionary containing overall performance metrics.
+    output_path : str
+        Path to save the output CSV file.
     """
     print(f"Saving results to CSV file: {output_path}.")
+
+    results_df = pd.DataFrame({
+        'group_id': group_ids,
+        'true_value': y_true,
+        'predicted_value': y_pred,
+        'absolute_error': [abs(t - p) for t, p in zip(y_true, y_pred)],
+        'squared_error': [(t - p)**2 for t, p in zip(y_true, y_pred)]
+    })
     
-    try:
-        # Create main results DataFrame with individual predictions
-        results_df = pd.DataFrame({
-            'group_id': group_ids,
-            'true_value': y_true,
-            'predicted_value': y_pred,
-            'absolute_error': [abs(t - p) for t, p in zip(y_true, y_pred)],
-            'squared_error': [(t - p)**2 for t, p in zip(y_true, y_pred)]
-        })
+    # Create summary metrics DataFrame
+    metrics_df = pd.DataFrame([metrics])
+    metrics_df.index = ['overall_metrics']
+    
+    # Generate filename based on model and testset names
+    model_name = Path(model_path).stem
+    output_dir = os.path.dirname(output_path)
+    filename = f"MODEL_{model_name}_TESTSET_{testset_name}.csv"
+    final_output_path = os.path.join(output_dir, filename)
+    
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Write results to CSV
+    with open(final_output_path, 'w') as f:
+        # Write header comment
+        f.write("# AEV-PLIG Model Assessment Results\n")
+        f.write("# Generated by assess_model.py\n\n")
         
-        # Create summary metrics DataFrame
-        metrics_df = pd.DataFrame([metrics])
-        metrics_df.index = ['overall_metrics']
+        # Write overall metrics section
+        f.write("# Overall Performance Metrics\n")
+        metrics_df.to_csv(f, index_label='metric_type')
+        f.write("\n")
         
-        # Generate filename based on model and testset names
-        model_name = Path(model_path).stem
-        output_dir = os.path.dirname(output_path)
-        filename = f"MODEL_{model_name}_TESTSET_{testset_name}.csv"
-        final_output_path = os.path.join(output_dir, filename)
-        
-        # Ensure output directory exists
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Write results to CSV
-        with open(final_output_path, 'w') as f:
-            # Write header comment
-            f.write("# AEV-PLIG Model Assessment Results\n")
-            f.write("# Generated by assess_model.py\n\n")
-            
-            # Write overall metrics section
-            f.write("# Overall Performance Metrics\n")
-            metrics_df.to_csv(f, index_label='metric_type')
-            f.write("\n")
-            
-            # Write individual predictions section  
-            f.write("# Individual Predictions\n")
-            results_df.to_csv(f, index=False)
-        
-        print(f"Successfully saved {len(results_df)} predictions and metrics to {final_output_path}")
-        
-    except Exception as e:
-        raise RuntimeError(f"Failed to save results to CSV: {str(e)}")
+        # Write individual predictions section  
+        f.write("# Individual Predictions\n")
+        results_df.to_csv(f, index=False)
+    
+    print(f"Successfully saved {len(results_df)} predictions and metrics to {final_output_path}")
 
 def assess_single_dataset(model: GATv2Net, scaler: Any, device: torch.device,
                          data_root: str, testset_name: str, trainset_name: str,
@@ -239,49 +234,52 @@ def assess_single_dataset(model: GATv2Net, scaler: Any, device: torch.device,
     """
     Assess model on a single test dataset.
     
-    Args:
-        model: Trained model
-        scaler: Scaler used during training
-        device: PyTorch device
-        data_root: Root directory containing datasets
-        testset_name: Name of test dataset
-        trainset_name: Name of train dataset
-        model_path: Path to model file (for output naming)
-        output_path: output path
+    Parameters
+    ----------
+    model : GATv2Net
+        Trained model
+    scaler : Any
+        Scaler used during training
+    device : torch.device
+        PyTorch device
+    data_root : str
+        Root directory containing datasets
+    testset_name : str
+        Name of test dataset
+    trainset_name : str
+        Name of train dataset
+    model_pat : str
+        Path to model file (for output naming)
+    output_path : str
+        output path
     """
     print(f"Assessing model on dataset: {testset_name}")
+
+    test_data, test_loader = load_test_dataset(data_root, testset_name, trainset_name)
     
-    try:
-        # Load test dataset
-        test_data, test_loader = load_test_dataset(data_root, testset_name, trainset_name)
-        
-        # Run model assessment
-        print(f"Running predictions on {testset_name}...")
-        y_true, y_pred, group_ids = predict(model, device, test_loader, scaler)
-        
-        print(f"Completed predictions for {testset_name}")
-        print(f"True values range: {min(y_true):.4f} to {max(y_true):.4f}")
-        print(f"Predicted values range: {min(y_pred):.4f} to {max(y_pred):.4f}")
-        
-        # Calculate performance metrics
-        metrics = calc_metrics.MetricCalculator(y_pred, y_true, group_ids)
-        metrics_dict = {
-            'pearson_correlation': metrics.pearson(),
-            'dataset_name': testset_name,
-            'num_samples': len(y_true)
-        }
-        
-        # print('Pearson correlation:', metrics.pearson())
-        print(f'Pearson correlation for {testset_name}: {metrics.pearson()}')
-        
-        # Save results to CSV
-        save_results_to_csv(y_true, y_pred, group_ids, metrics_dict, output_path, model_path, testset_name)
-        
-        print(f"Results for {testset_name} saved to: {output_path}")
-        
-    except Exception as e:
-        print(f"Failed to assess dataset {testset_name}: {str(e)}")
-        raise
+    # Run model assessment
+    print(f"Running predictions on {testset_name}...")
+    y_true, y_pred, group_ids = predict(model, device, test_loader, scaler)
+    
+    print(f"Completed predictions for {testset_name}")
+    print(f"True values range: {min(y_true):.4f} to {max(y_true):.4f}")
+    print(f"Predicted values range: {min(y_pred):.4f} to {max(y_pred):.4f}")
+    
+    # Calculate performance metrics
+    metrics = calc_metrics.MetricCalculator(y_pred, y_true, group_ids)
+    metrics_dict = {
+        'pearson_correlation': metrics.pearson(),
+        'dataset_name': testset_name,
+        'num_samples': len(y_true)
+    }
+    
+    # print('Pearson correlation:', metrics.pearson())
+    print(f'Pearson correlation for {testset_name}: {metrics.pearson()}')
+    
+    # Save results to CSV
+    save_results_to_csv(y_true, y_pred, group_ids, metrics_dict, output_path, model_path, testset_name)
+    
+    print(f"Results for {testset_name} saved to: {output_path}")
 
 
 def main():
