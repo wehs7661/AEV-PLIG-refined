@@ -1,9 +1,12 @@
 import os
+import sys
+import time
 import torch
 import pickle
 import argparse
 import pandas as pd
 import logging
+import aev_plig
 from typing import Tuple, List, Optional, Dict, Any
 from pathlib import Path
 from aev_plig.utils import nn_utils, calc_metrics
@@ -11,72 +14,62 @@ from aev_plig.model import GATv2Net
 from torch_geometric.loader import DataLoader
 from aev_plig.cli.train_aev_plig import predict
 
-"""
-Command-line interface for assessing trained AEV-PLIG models on test datasets.
 
-This module provides functionality to evaluate pre-trained models on benchmark datasets such as
-FEP benchmark and CASF2016, generating performance metrics and saving results to CSV files.
-"""
-
-
-def parse_command_line_arguments() -> argparse.Namespace:
+def initialize(args) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Assess trained AEV-PLIG models on benchmark test datasets",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    
-    # Required arguments
     parser.add_argument(
-        '-m', '--model_path',
+        '-m',
+        '--model_path',
         required=True,
         help="Path to trained model file, e.g. /home/foo.model"
     )
-
     parser.add_argument(
-        '-s', '--scaler_path',
+        '-s',
+        '--scaler_path',
         required=True,
         help="Path to scaler pickle, e.g. /home/foo.pickle"
     )
-    
     parser.add_argument(
-        '-d', '--data_root',
+        '-d',
+        '--data_root',
         required=True,
         help="Root directory containing test and training dataset .pt files"
     )
-    
-    # Optional arguments
     parser.add_argument(
-        '-t', '--test_dataset',
-        nargs='+',  # Allow multiple arguments
+        '-t',
+        '--test_dataset',
+        nargs='+',
         default=['dataset_test'],
         help="Name(s) of test dataset(s). Can specify multiple datasets separated by spaces."
     )
-
     parser.add_argument(
-        '-r', '--train_dataset',
+        '-r',
+        '--train_dataset',
         default='dataset_train',
         help="Name of train dataset. The train dataset is used for scaling the test data to have mean=0, stddev=1."
     )
-
     parser.add_argument(
-        '-o', '--output_path',
+        '-o',
+        '--output_path',
         default='./',
         help="Directory to output CSV file containing results, defaults to working directory"
     )
-
     parser.add_argument(
-        '-l', '--log_file',
+        '-l',
+        '--log_file',
         help="Path to log file (if not specified, logs only to console)"
     )
-    
     parser.add_argument(
         '--device',
         default='cuda',
         choices=['cpu', 'cuda'],
         help="Device to use for model inference"
     )
-    
-    return parser.parse_args()
+
+    args = parser.parse_args(args)
+    return args
 
 
 def setup_logging(log_file: Optional[str] = None) -> logging.Logger:
@@ -332,8 +325,10 @@ def main():
     5. Calculate performance metrics
     6. Save results to CSV
     """
-    # Parse command line arguments
-    args = parse_command_line_arguments()
+    t0 = time.time()
+    args = initialize(sys.argv[1:])
+
+    
     
     # Set up logging
     logger = setup_logging(args.log_file)
@@ -386,14 +381,8 @@ def main():
         
         if successful_assessments == 0:
             raise RuntimeError("All dataset assessments failed")
-
-        
         logger.info("Model assessment completed successfully")
         
     except Exception as e:
         logger.error(f"Model assessment failed: {str(e)}")
         raise
-
-
-if __name__ == "__main__":
-    main()
