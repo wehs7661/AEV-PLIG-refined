@@ -5,7 +5,7 @@ import torch
 import pickle
 import argparse
 import pandas as pd
-import logging
+import datetime
 import aev_plig
 from typing import Tuple, List, Optional, Dict, Any
 from pathlib import Path
@@ -13,6 +13,7 @@ from aev_plig.utils import nn_utils, calc_metrics
 from aev_plig.model import GATv2Net
 from torch_geometric.loader import DataLoader
 from aev_plig.cli.train_aev_plig import predict
+from aev_plig.utils import utils
 
 
 def initialize(args) -> argparse.Namespace:
@@ -58,8 +59,10 @@ def initialize(args) -> argparse.Namespace:
     )
     parser.add_argument(
         '-l',
-        '--log_file',
-        help="Path to log file (if not specified, logs only to console)"
+        '--log',
+        type=str,
+        default='assess_trained_models.log',
+        help="The path to the log file. The default is train_aev_plig.log."
     )
     parser.add_argument(
         '--device',
@@ -70,36 +73,6 @@ def initialize(args) -> argparse.Namespace:
 
     args = parser.parse_args(args)
     return args
-
-
-def setup_logging(log_file: Optional[str] = None) -> logging.Logger:
-    """
-    Set up logging configuration for the assessment process.
-    
-    Args:
-        log_file: Optional path to log file. If None, logs only to console.
-        
-    Returns:
-        Configured logger instance.
-    """
-    logger = logging.getLogger('assess_model')
-    logger.setLevel(logging.INFO)
-    
-    # Create formatter for log messages
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
-    # Console handler - always present
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-    
-    # File handler - optional
-    if log_file:
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-    
-    return logger
 
 
 def load_trained_model(model_path: str, scaler_path: str, num_node_features: int, 
@@ -196,7 +169,7 @@ def load_test_dataset(data_root: str, testset_name: str, trainset_name: str) -> 
 
 
 def save_results_to_csv(y_true: List[float], y_pred: List[float], group_ids: List[str],
-                       metrics: Dict[str, float], output_path: str, logger: logging.Logger,
+                       metrics: Dict[str, float], output_path: str,
                        model_path: str, testset_name: str) -> None:
     """
     Save assessment results to a CSV file.
@@ -211,12 +184,11 @@ def save_results_to_csv(y_true: List[float], y_pred: List[float], group_ids: Lis
         group_ids: Group/complex identifiers
         metrics: Dictionary of calculated performance metrics
         output_path: Path where CSV file should be saved
-        logger: Logger for progress tracking
         
     Raises:
         RuntimeError: If CSV writing fails
     """
-    logger.info(f"Saving results to CSV file: {output_path}")
+    print(f"Saving results to CSV file: {output_path}.")
     
     try:
         # Create main results DataFrame with individual predictions
@@ -256,14 +228,14 @@ def save_results_to_csv(y_true: List[float], y_pred: List[float], group_ids: Lis
             f.write("# Individual Predictions\n")
             results_df.to_csv(f, index=False)
         
-        logger.info(f"Successfully saved {len(results_df)} predictions and metrics to {final_output_path}")
+        print(f"Successfully saved {len(results_df)} predictions and metrics to {final_output_path}")
         
     except Exception as e:
         raise RuntimeError(f"Failed to save results to CSV: {str(e)}")
 
 def assess_single_dataset(model: GATv2Net, scaler: Any, device: torch.device,
                          data_root: str, testset_name: str, trainset_name: str,
-                         model_path: str, output_path: str, logger: logging.Logger) -> None:
+                         model_path: str, output_path: str) -> None:
     """
     Assess model on a single test dataset.
     
@@ -276,21 +248,20 @@ def assess_single_dataset(model: GATv2Net, scaler: Any, device: torch.device,
         trainset_name: Name of train dataset
         model_path: Path to model file (for output naming)
         output_path: output path
-        logger: Logger instance
     """
-    logger.info(f"Assessing model on dataset: {testset_name}")
+    print(f"Assessing model on dataset: {testset_name}")
     
     try:
         # Load test dataset
         test_data, test_loader = load_test_dataset(data_root, testset_name, trainset_name)
         
         # Run model assessment
-        logger.info(f"Running predictions on {testset_name}...")
+        print(f"Running predictions on {testset_name}...")
         y_true, y_pred, group_ids = predict(model, device, test_loader, scaler)
         
-        logger.info(f"Completed predictions for {testset_name}")
-        logger.info(f"True values range: {min(y_true):.4f} to {max(y_true):.4f}")
-        logger.info(f"Predicted values range: {min(y_pred):.4f} to {max(y_pred):.4f}")
+        print(f"Completed predictions for {testset_name}")
+        print(f"True values range: {min(y_true):.4f} to {max(y_true):.4f}")
+        print(f"Predicted values range: {min(y_pred):.4f} to {max(y_pred):.4f}")
         
         # Calculate performance metrics
         metrics = calc_metrics.MetricCalculator(y_pred, y_true, group_ids)
@@ -301,59 +272,49 @@ def assess_single_dataset(model: GATv2Net, scaler: Any, device: torch.device,
         }
         
         # print('Pearson correlation:', metrics.pearson())
-        logger.info(f'Pearson correlation for {testset_name}: {metrics.pearson()}')
+        print(f'Pearson correlation for {testset_name}: {metrics.pearson()}')
         
         # Save results to CSV
-        save_results_to_csv(y_true, y_pred, group_ids, metrics_dict, output_path, logger, model_path, testset_name)
+        save_results_to_csv(y_true, y_pred, group_ids, metrics_dict, output_path, model_path, testset_name)
         
-        logger.info(f"Results for {testset_name} saved to: {output_path}")
+        print(f"Results for {testset_name} saved to: {output_path}")
         
     except Exception as e:
-        logger.error(f"Failed to assess dataset {testset_name}: {str(e)}")
+        print(f"Failed to assess dataset {testset_name}: {str(e)}")
         raise
 
 
 def main():
-    """
-    Main function orchestrating the model assessment workflow.
-    
-    This function coordinates all the steps needed to assess a trained model:
-    1. Parse command line arguments
-    2. Set up logging
-    3. Load trained model and test data
-    4. Run model assessment 
-    5. Calculate performance metrics
-    6. Save results to CSV
-    """
     t0 = time.time()
     args = initialize(sys.argv[1:])
+    sys.stdout = utils.Logger(args.log)
+    sys.stderr = utils.Logger(args.log)
 
+    print(f"Version of aev_plig: {aev_plig.__version__}")
+    print(f"Command line: {' '.join(sys.argv)}")
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Current time: {datetime.datetime.now()}")
     
-    
-    # Set up logging
-    logger = setup_logging(args.log_file)
-    logger.info("Starting AEV-PLIG model assessment")
+    print("\nStarting AEV-PLIG model assessment ...")
     
     # Convert single dataset to list
     test_datasets = args.test_dataset if isinstance(args.test_dataset, list) else [args.test_dataset]
-    logger.info(f"Will assess model on {len(test_datasets)} dataset(s): {', '.join(test_datasets)}")
+    print(f"Assessing model on {len(test_datasets)} dataset(s): {', '.join(test_datasets)} ...")
     
     try:
-        # Set up computation device
         if args.device == 'cuda' and torch.cuda.is_available():
             device = torch.device('cuda')
-            logger.info("Using CUDA for inference")
+            print("Using CUDA for inference")
         else:
             device = torch.device('cpu')
-            logger.info("Using CPU for inference")
+            print("Using CPU for inference")
         
-        # Load test dataset first to get feature dimensions
-        logger.info("Loading test dataset...")
+        print("Loading the test dataset ...")
         # We need to load with a dummy scaler first to get dimensions
         test_data, _ = load_test_dataset(args.data_root, test_datasets[0], args.train_dataset)
         
         # Load trained model and scaler
-        logger.info("Loading trained model...")
+        print("Loading the trained model ...")
         model, scaler = load_trained_model(
             args.model_path,
             args.scaler_path,
@@ -369,20 +330,20 @@ def main():
                 assess_single_dataset(
                     model, scaler, device,
                     args.data_root, testset_name, args.train_dataset,
-                    args.model_path, args.output_path, logger
+                    args.model_path, args.output_path,
                 )
                 successful_assessments += 1
             except Exception as e:
-                logger.error(f"Failed to assess dataset {testset_name}: {str(e)}")
+                print(f"Failed to assess dataset {testset_name}: {str(e)}")
                 # Continue with other datasets rather than failing completely
                 continue
         
-        logger.info(f"Model assessment completed successfully for {successful_assessments}/{len(test_datasets)} datasets")
+        print(f"Model assessment completed successfully for {successful_assessments}/{len(test_datasets)} datasets")
         
         if successful_assessments == 0:
             raise RuntimeError("All dataset assessments failed")
-        logger.info("Model assessment completed successfully")
+        print("Model assessment completed successfully")
         
     except Exception as e:
-        logger.error(f"Model assessment failed: {str(e)}")
+        print(f"Model assessment failed: {str(e)}")
         raise
