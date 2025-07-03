@@ -25,10 +25,24 @@ def initialize(args) -> argparse.Namespace:
     parser.add_argument(
         "-md",
         "--model_dir",
-        default='./',
+        default='outputs',
         help="Directory containing trained model files and the pickled scaler file shared by the models. \
             If not specified, the current working directory is used."
     )
+    parser.add_argument(
+        "-tr",
+        "--train_dataset",
+        default='data/processed/dataset_train.pt',
+        help="The path to the PyTorch file of the training set for scaling the test data."
+    )
+    parser.add_argument(
+        "-t",
+        "--test_dataset",
+        default='data/processed/dataset_test.pt',
+        help="The path to the PyTorch file of the test set."
+    )
+
+    """
     parser.add_argument(
         '-d',
         '--data_root',
@@ -48,6 +62,7 @@ def initialize(args) -> argparse.Namespace:
         default='dataset_train',
         help="Name of train dataset. The train dataset is used for scaling the test data to have mean=0, stddev=1."
     )
+    """
     parser.add_argument(
         '-o',
         '--output_path',
@@ -60,12 +75,6 @@ def initialize(args) -> argparse.Namespace:
         type=str,
         default='assess_trained_models.log',
         help="The path to the log file. The default is train_aev_plig.log."
-    )
-    parser.add_argument(
-        '--device',
-        default='cuda',
-        choices=['cpu', 'cuda'],
-        help="Device to use for model inference"
     )
 
     args = parser.parse_args(args)
@@ -96,26 +105,19 @@ def load_trained_model(model_path: str, scaler_path: str, num_node_features: int
         The loaded GATv2Net model with trained weights.
     scaler : Any
         The scaler used during training, typically a StandardScaler or similar.
-    """
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model file not found: {model_path}")
-    if not os.path.exists(scaler_path):
-        raise FileNotFoundError(f"Scaler file not found: {scaler_path}")
-    
+    """    
     config = argparse.Namespace(
         hidden_dim=256,
         n_heads=3,
         act_fn='leaky_relu'
     )
     
-    # Initialize model architecture
     model = GATv2Net(
         node_feature_dim=num_node_features,
         edge_feature_dim=num_edge_features,
         config=config
     )
-    
-    # Load trained model weights
+
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
     model.eval()
@@ -225,6 +227,7 @@ def save_results_to_csv(y_true: List[float], y_pred: List[float], group_ids: Lis
     
     print(f"Successfully saved {len(results_df)} predictions and metrics to {final_output_path}")
 
+
 def assess_single_dataset(model: GATv2Net, scaler: Any, device: torch.device,
                          data_root: str, testset_name: str, trainset_name: str,
                          model_path: str, output_path: str) -> None:
@@ -300,18 +303,21 @@ def main():
     scaler_path = scaler_path[0]
     print(f"\nFound the scaler file in directory {args.model_dir}: {os.path.basename(scaler_path)}\n")
 
-    if args.device == 'cuda' and torch.cuda.is_available():
-        device = torch.device('cuda')
-        print("Using CUDA for inference")
-    else:
-        device = torch.device('cpu')
-        print("Using CPU for inference")
-    
-    print("Loading the test dataset ...")  # We need to load with a dummy scaler first to get dimensions
-    test_data, _ = load_test_dataset(args.data_root, args.test_dataset[0], args.train_dataset)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Load trained model and scaler
-    print("Loading the trained model ...")
+    train_data = nn_utils.GraphDataset(
+        root=os.path.dirname(os.path.dirname(args.train_dataset)),
+        dataset=os.path.splitext(os.path.basename(args.train_dataset))[0],
+        y_scaler=None
+    )
+    test_data = nn_utils.GraphDataset(
+        root=os.path.dirname(os.path.dirname(args.test_dataset)),
+        dataset=os.path.splitext(os.path.basename(args.test_dataset))[0],
+        y_scaler=train_data.y_scaler
+    )
+    test_loader = DataLoader(test_data, batch_size=128, shuffle=False)
+
+    print(f"Loading the trained model and scaler file ...")
     model, scaler = load_trained_model(
         model_paths[0],
         scaler_path,
@@ -320,6 +326,12 @@ def main():
         device
     )
 
+    y_true, y_pred, group_ids = predict(model, device, test_loader, scaler)
+
+    metrics = calc_metrics.MetricCalculator(y_true, y_pred, group_ids)
+    print('Pearson correlation:', metrics.pearson())
+
+    """
     # Assess model on each test dataset
     successful_assessments = 0
     for testset_name in args.test_dataset:
@@ -340,3 +352,4 @@ def main():
     if successful_assessments == 0:
         raise RuntimeError("All dataset assessments failed")
     print("Model assessment completed successfully")
+    """
