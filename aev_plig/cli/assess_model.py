@@ -6,11 +6,11 @@ import torch
 import pickle
 import natsort
 import argparse
-import pandas as pd
 import datetime
 import aev_plig
-from typing import Tuple, List, Optional, Dict, Any
-from pathlib import Path
+import numpy as np
+import pandas as pd
+from typing import Tuple, List, Any
 from aev_plig.utils import nn_utils, calc_metrics
 from aev_plig.model import GATv2Net
 from torch_geometric.loader import DataLoader
@@ -42,6 +42,27 @@ def initialize(args) -> argparse.Namespace:
         help="The path to the PyTorch file of the test set."
     )
     parser.add_argument(
+        '-hd',
+        '--hidden_dim',
+        type=int,
+        default=256,
+        help='The hidden dimension size. The default is 256.'
+    )
+    parser.add_argument(
+        '-nh',
+        '--n_heads',
+        type=int,
+        default=3,
+        help='The number of attention heads. The default is 3.'
+    )
+    parser.add_argument(
+        '-a',
+        '--act_fn',
+        type=str,
+        default='leaky_relu',
+        help='The activation function. The default is leaky_relu.'
+    )
+    parser.add_argument(
         '-o',
         '--output_csv',
         default='assess_trained_models.csv',
@@ -61,7 +82,7 @@ def initialize(args) -> argparse.Namespace:
 
 
 def load_trained_model(model_path: str, scaler_path: str, num_node_features: int, 
-                      num_edge_features: int, device: torch.device) -> Tuple[GATv2Net, Any]:
+                      num_edge_features: int, device: torch.device, config: argparse.Namespace) -> Tuple[GATv2Net, Any]:
     """
     Load a pre-trained AEV-PLIG model and its associated scaler.
     
@@ -77,6 +98,8 @@ def load_trained_model(model_path: str, scaler_path: str, num_node_features: int
         Number of edge features in the graph data
     device : str
         PyTorch device to load the model on. The values should be 'cpu' or 'cuda'.
+    config : argparse.Namespace
+        Configuration parameters for the GATv2Net model, including hidden_dim, n_heads, and act_fn.
         
     Returns
     -------
@@ -85,12 +108,6 @@ def load_trained_model(model_path: str, scaler_path: str, num_node_features: int
     scaler : Any
         The scaler used during training, typically a StandardScaler or similar.
     """    
-    config = argparse.Namespace(
-        hidden_dim=256,
-        n_heads=3,
-        act_fn='leaky_relu'
-    )
-    
     model = GATv2Net(
         node_feature_dim=num_node_features,
         edge_feature_dim=num_edge_features,
@@ -141,59 +158,36 @@ def make_predictions(model: GATv2Net, device: torch.device, data_loader: DataLoa
     return df_results
 
 
-def assess_single_dataset(model: GATv2Net, scaler: Any, device: torch.device,
-                         data_root: str, testset_name: str, trainset_name: str,
-                         model_path: str, output_path: str) -> None:
+def assess_ensemble(df_results_list: List[pd.DataFrame]) -> pd.DataFrame:
     """
-    Assess model on a single test dataset.
+    Assess the ensemble of predictions from multiple models.
     
     Parameters
     ----------
-    model : GATv2Net
-        Trained model
-    scaler : Any
-        Scaler used during training
-    device : torch.device
-        PyTorch device
-    data_root : str
-        Root directory containing datasets
-    testset_name : str
-        Name of test dataset
-    trainset_name : str
-        Name of train dataset
-    model_pat : str
-        Path to model file (for output naming)
-    output_path : str
-        output path
+    df_results_list : List[pd.DataFrame]
+        List of DataFrames containing predictions from different models.
+        
+    Returns
+    -------
+    df_ensemble : pd.DataFrame
+        DataFrame containing the ensemble predictions.
     """
-    print(f"Assessing model on dataset: {testset_name}")
+    y_pred_ensemble = list(np.mean([df['y_pred'] for df in df_results_list], axis=0))
+    y_true = df_results_list[0]['y_true']  # assumed same across all models
+    group_ids = df_results_list[0]['group_id'] # assumed same across all models
+    err_abs = [abs(t - p) for t, p in zip(y_true, y_pred_ensemble)]
+    err_sq = [(t - p)**2 for t, p in zip(y_true, y_pred_ensemble)]
+    
+    df_ensemble = pd.DataFrame({
+        'y_true': y_true,
+        'y_pred': y_pred_ensemble,
+        'group_id': group_ids,
+        'absolute_error': err_abs,
+        'squared_error': err_sq
+    })
+    df_ensemble.insert(0, 'model', 'ensemble')
 
-    test_data, test_loader = load_test_dataset(data_root, testset_name, trainset_name)
-    
-    # Run model assessment
-    print(f"Running predictions on {testset_name}...")
-    y_true, y_pred, group_ids = predict(model, device, test_loader, scaler)
-    
-    print(f"Completed predictions for {testset_name}")
-    print(f"True values range: {min(y_true):.4f} to {max(y_true):.4f}")
-    print(f"Predicted values range: {min(y_pred):.4f} to {max(y_pred):.4f}")
-    
-    # Calculate performance metrics
-    metrics = calc_metrics.MetricCalculator(y_pred, y_true, group_ids)
-    metrics_dict = {
-        'pearson_correlation': metrics.pearson(),
-        'dataset_name': testset_name,
-        'num_samples': len(y_true)
-    }
-    
-    # print('Pearson correlation:', metrics.pearson())
-    print(f'Pearson correlation for {testset_name}: {metrics.pearson()}')
-    
-    # Save results to CSV
-    save_results_to_csv(y_true, y_pred, group_ids, metrics_dict, output_path, model_path, testset_name)
-    
-    print(f"Results for {testset_name} saved to: {output_path}")
-
+    return df_ensemble
 
 def main():
     t0 = time.time()
@@ -230,16 +224,23 @@ def main():
     )
     test_loader = DataLoader(test_data, batch_size=128, shuffle=False)
 
+    config = argparse.Namespace(
+        hidden_dim=args.hidden_dim,
+        n_heads=args.n_heads,
+        act_fn=args.act_fn
+    )
+
     df_results_list = []
     for i in range(len(model_paths)):
         print(f"\n🔍 Assessing model {i+1}/{len(model_paths)}: {os.path.basename(model_paths[i])} ...")
-        print(f"  Loading the trained model and scaler file ...")
+        print(f"   Loading the trained model and scaler file ...")
         model, scaler = load_trained_model(
             model_paths[i],
             scaler_path,
             test_data.num_node_features,
             test_data.num_edge_features,
-            device
+            device,
+            config
         )
         df_results = make_predictions(model, device, test_loader, scaler)
         df_results.insert(0, 'model', os.path.basename(model_paths[i]).split('.')[0])
@@ -251,13 +252,28 @@ def main():
             None if df_results['group_id'].isnull().all() else df_results['group_id'].tolist()
         )
         all_metrics = metrics.all_metrics()
-
         print(f"\n   Metrics for model {i+1}:")
         print(f"     - RMSE: {all_metrics['rmse'][0]:.7f}")
         print(f"     - Pearson correlation: {all_metrics['pearson'][0]:.7f}")
         print(f"     - Kendall's tau correlation: {all_metrics['kendall'][0]:.7f}")
         print(f"     - Spearman correlation: {all_metrics['spearman'][0]:.7f}")
         print(f"     - C-index: {all_metrics['c_index'][0]:.7f}")
+
+    df_ensemble = assess_ensemble(df_results_list)
+    df_results_list.append(df_ensemble)
+    metrics = calc_metrics.MetricCalculator(
+        df_ensemble['y_true'].tolist(),
+        df_ensemble['y_pred'].tolist(),
+        None if df_ensemble['group_id'].isnull().all() else df_ensemble['group_id'].tolist()
+    )
+    all_metrics = metrics.all_metrics()
+    section_str = "\nTest results for the ensemble model"
+    print(section_str + "\n" + "=" * (len(section_str) - 1))
+    print(f"RMSE: {all_metrics['rmse'][0]:.7f}")
+    print(f"Pearson correlation: {all_metrics['pearson'][0]:.7f}")
+    print(f"Kendall's tau correlation: {all_metrics['kendall'][0]:.7f}")
+    print(f"Spearman correlation: {all_metrics['spearman'][0]:.7f}")
+    print(f"C-index: {all_metrics['c_index'][0]:.7f}")
 
     df = pd.concat(df_results_list, ignore_index=True)
     df.to_csv(args.output_csv, index=False)
