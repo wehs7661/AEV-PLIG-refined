@@ -137,7 +137,10 @@ def predict(model, device, loader, y_scaler=None):
             output = model(data)
             total_preds = torch.cat((total_preds, output.cpu()), 0)
             total_labels = torch.cat((total_labels, data.y.view(-1, 1).cpu()), 0)
-            group_ids.extend([i.item() for i in data.group_id])  # it was a numpy array
+            if hasattr(data, 'group_id'):
+                group_ids.extend([i.item() for i in data.group_id])  # it was a numpy array
+            else:
+                group_ids.extend([None] * len(data.y))
 
     y_true = y_scaler.inverse_transform(total_labels.numpy().flatten().reshape(-1,1)).flatten()
     y_pred = y_scaler.inverse_transform(total_preds.detach().numpy().flatten().reshape(-1,1)).flatten()
@@ -229,10 +232,10 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
 
         print(f'\n  ✅ Completed epoch {epoch + 1}/{n_epochs}')
         print(f'    - Validation loss (MSE): {loss:.7f}')
-        print(f'    - Pearson correlation coefficient: {all_metrics['pearson'][0]:.7f}')
+        print(f"    - Pearson correlation coefficient: {all_metrics['pearson'][0]:.7f}")
         print(f"    - Kendall's tau correlation coefficient: {all_metrics['kendall'][0]:.7f}")
-        print(f'    - Spearman correlation coefficient: {all_metrics['spearman'][0]:.7f}')
-        print(f'    - C-index: {all_metrics['c_index'][0]:.7f}')
+        print(f"    - Spearman correlation coefficient: {all_metrics['spearman'][0]:.7f}")
+        print(f"    - C-index: {all_metrics['c_index'][0]:.7f}")
 
 def train_ensemble(batch_size, learning_rate, n_epochs, prefix, hidden_dim, n_heads, act_fn, seeds, output_dir):
     """
