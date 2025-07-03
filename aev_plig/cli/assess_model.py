@@ -107,6 +107,40 @@ def load_trained_model(model_path: str, scaler_path: str, num_node_features: int
     return model, scaler
 
 
+def make_predictions(model: GATv2Net, device: torch.device, data_loader: DataLoader, scaler: Any) -> Tuple[List[float], List[float], List[int]]:
+    """
+    Make predictions using the trained model on the provided data loader.
+    
+    Parameters
+    ----------
+    model : GATv2Net
+        The trained GATv2Net model.
+    device : torch.device
+        The device to run the model on (CPU or GPU).
+    data_loader : DataLoader
+        DataLoader containing the test dataset.
+    scaler : Any
+        Scaler used to transform the target variable during training.
+        
+    Returns
+    -------
+    df_results : pd.DataFrame
+        DataFrame containing the true values, predicted values, group IDs, absolute errors, and squared errors.
+    """
+    y_true, y_pred, group_ids = predict(model, device, data_loader, scaler)
+    err_abs = [abs(t - p) for t, p in zip(y_true, y_pred)]
+    err_sq = [(t - p)**2 for t, p in zip(y_true, y_pred)]
+    df_results = pd.DataFrame({
+        'y_true': y_true,
+        'y_pred': y_pred,
+        'group_id': group_ids,
+        'absolute_error': err_abs,
+        'squared_error': err_sq
+    })
+
+    return df_results
+
+
 def assess_single_dataset(model: GATv2Net, scaler: Any, device: torch.device,
                          data_root: str, testset_name: str, trainset_name: str,
                          model_path: str, output_path: str) -> None:
@@ -196,34 +230,35 @@ def main():
     )
     test_loader = DataLoader(test_data, batch_size=128, shuffle=False)
 
-    print(f"Loading the trained model and scaler file ...")
-    model, scaler = load_trained_model(
-        model_paths[0],
-        scaler_path,
-        test_data.num_node_features,
-        test_data.num_edge_features,
-        device
-    )
+    df_results_list = []
+    for i in range(len(model_paths)):
+        print(f"\n🔍 Assessing model {i+1}/{len(model_paths)}: {os.path.basename(model_paths[i])} ...")
+        print(f"  Loading the trained model and scaler file ...")
+        model, scaler = load_trained_model(
+            model_paths[i],
+            scaler_path,
+            test_data.num_node_features,
+            test_data.num_edge_features,
+            device
+        )
+        df_results = make_predictions(model, device, test_loader, scaler)
+        df_results.insert(0, 'model', os.path.basename(model_paths[i]).split('.')[0])
+        df_results_list.append(df_results)
 
-    y_true, y_pred, group_ids = predict(model, device, test_loader, scaler)
-    err_abs = [abs(t - p) for t, p in zip(y_true, y_pred)]
-    err_sq = [(t - p)**2 for t, p in zip(y_true, y_pred)]
-    df = pd.DataFrame({
-        'y_true': y_true,
-        'y_pred': y_pred,
-        'group_id': group_ids,
-        'absolute_error': err_abs,
-        'squared_error': err_sq
-    })
-    
+        metrics = calc_metrics.MetricCalculator(
+            df_results['y_true'].tolist(),
+            df_results['y_pred'].tolist(),
+            None if df_results['group_id'].isnull().all() else df_results['group_id'].tolist()
+        )
+        all_metrics = metrics.all_metrics()
+
+        print(f"\n   Metrics for model {i+1}:")
+        print(f"     - RMSE: {all_metrics['rmse'][0]:.7f}")
+        print(f"     - Pearson correlation: {all_metrics['pearson'][0]:.7f}")
+        print(f"     - Kendall's tau correlation: {all_metrics['kendall'][0]:.7f}")
+        print(f"     - Spearman correlation: {all_metrics['spearman'][0]:.7f}")
+        print(f"     - C-index: {all_metrics['c_index'][0]:.7f}")
+
+    df = pd.concat(df_results_list, ignore_index=True)
     df.to_csv(args.output_csv, index=False)
-    print(f"Predictions saved to {args.output_csv}")
-
-    metrics = calc_metrics.MetricCalculator(y_true, y_pred, group_ids)
-    all_metrics = metrics.all_metrics()
-
-    print(f"\nRMSE: {all_metrics['rmse'][0]:.7f}")
-    print(f"Pearson correlation: {all_metrics['pearson'][0]:.7f}")
-    print(f"Kendall's tau correlation: {all_metrics['kendall'][0]:.7f}")
-    print(f"Spearman correlation: {all_metrics['spearman'][0]:.7f}")
-    print(f"C-index: {all_metrics['c_index'][0]:.7f}")
+    print(f"\nPredictions saved to {args.output_csv}")
