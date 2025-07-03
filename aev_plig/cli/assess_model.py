@@ -1,8 +1,10 @@
 import os
 import sys
 import time
+import glob
 import torch
 import pickle
+import natsort
 import argparse
 import pandas as pd
 import datetime
@@ -21,16 +23,11 @@ def initialize(args) -> argparse.Namespace:
         description="Assess trained AEV-PLIG models on benchmark test datasets",
     )
     parser.add_argument(
-        '-m',
-        '--model_path',
-        required=True,
-        help="Path to trained model file, e.g. /home/foo.model"
-    )
-    parser.add_argument(
-        '-s',
-        '--scaler_path',
-        required=True,
-        help="Path to scaler pickle, e.g. /home/foo.pickle"
+        "-md",
+        "--model_dir",
+        default='./',
+        help="Directory containing trained model files and the pickled scaler file shared by the models. \
+            If not specified, the current working directory is used."
     )
     parser.add_argument(
         '-d',
@@ -293,55 +290,53 @@ def main():
     print(f"Current working directory: {os.getcwd()}")
     print(f"Current time: {datetime.datetime.now()}")
     
-    print("\nStarting AEV-PLIG model assessment ...")
+    model_paths = natsort.natsorted(glob.glob(os.path.join(args.model_dir, '*.model')))
+    print(f"\nFound {len(model_paths)} model files in directory {args.model_dir}:")
+    for i in range(len(model_paths)):
+        print(f"  {os.path.basename(model_paths[i])}")
     
-    # Convert single dataset to list
-    test_datasets = args.test_dataset if isinstance(args.test_dataset, list) else [args.test_dataset]
-    print(f"Assessing model on {len(test_datasets)} dataset(s): {', '.join(test_datasets)} ...")
-    
-    try:
-        if args.device == 'cuda' and torch.cuda.is_available():
-            device = torch.device('cuda')
-            print("Using CUDA for inference")
-        else:
-            device = torch.device('cpu')
-            print("Using CPU for inference")
-        
-        print("Loading the test dataset ...")
-        # We need to load with a dummy scaler first to get dimensions
-        test_data, _ = load_test_dataset(args.data_root, test_datasets[0], args.train_dataset)
-        
-        # Load trained model and scaler
-        print("Loading the trained model ...")
-        model, scaler = load_trained_model(
-            args.model_path,
-            args.scaler_path,
-            test_data.num_node_features,
-            test_data.num_edge_features,
-            device
-        )
+    scaler_path = glob.glob(os.path.join(args.model_dir, '*.pickle'))
+    assert len(scaler_path) == 1, f"Expected exactly one scaler file in {args.model_dir} shared by the models, found {len(scaler_path)}"
+    scaler_path = scaler_path[0]
+    print(f"\nFound the scaler file in directory {args.model_dir}: {os.path.basename(scaler_path)}\n")
 
-        # Assess model on each test dataset
-        successful_assessments = 0
-        for testset_name in test_datasets:
-            try:
-                assess_single_dataset(
-                    model, scaler, device,
-                    args.data_root, testset_name, args.train_dataset,
-                    args.model_path, args.output_path,
-                )
-                successful_assessments += 1
-            except Exception as e:
-                print(f"Failed to assess dataset {testset_name}: {str(e)}")
-                # Continue with other datasets rather than failing completely
-                continue
-        
-        print(f"Model assessment completed successfully for {successful_assessments}/{len(test_datasets)} datasets")
-        
-        if successful_assessments == 0:
-            raise RuntimeError("All dataset assessments failed")
-        print("Model assessment completed successfully")
-        
-    except Exception as e:
-        print(f"Model assessment failed: {str(e)}")
-        raise
+    if args.device == 'cuda' and torch.cuda.is_available():
+        device = torch.device('cuda')
+        print("Using CUDA for inference")
+    else:
+        device = torch.device('cpu')
+        print("Using CPU for inference")
+    
+    print("Loading the test dataset ...")  # We need to load with a dummy scaler first to get dimensions
+    test_data, _ = load_test_dataset(args.data_root, args.test_dataset[0], args.train_dataset)
+
+    # Load trained model and scaler
+    print("Loading the trained model ...")
+    model, scaler = load_trained_model(
+        model_paths[0],
+        scaler_path,
+        test_data.num_node_features,
+        test_data.num_edge_features,
+        device
+    )
+
+    # Assess model on each test dataset
+    successful_assessments = 0
+    for testset_name in args.test_dataset:
+        try:
+            assess_single_dataset(
+                model, scaler, device,
+                args.data_root, testset_name, args.train_dataset,
+                model_paths[0], args.output_path,
+            )
+            successful_assessments += 1
+        except Exception as e:
+            print(f"Failed to assess dataset {testset_name}: {str(e)}")
+            # Continue with other datasets rather than failing completely
+            continue
+    
+    print(f"Model assessment completed successfully for {successful_assessments}/{len(args.test_dataset)} datasets")
+    
+    if successful_assessments == 0:
+        raise RuntimeError("All dataset assessments failed")
+    print("Model assessment completed successfully")
