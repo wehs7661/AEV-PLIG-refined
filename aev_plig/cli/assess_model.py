@@ -1,399 +1,282 @@
 import os
+import sys
+import time
+import glob
 import torch
 import pickle
+import natsort
 import argparse
+import datetime
+import aev_plig
+import numpy as np
 import pandas as pd
-import logging
-from typing import Tuple, List, Optional, Dict, Any
-from pathlib import Path
+from typing import Tuple, List, Any
 from aev_plig.utils import nn_utils, calc_metrics
 from aev_plig.model import GATv2Net
 from torch_geometric.loader import DataLoader
 from aev_plig.cli.train_aev_plig import predict
-
-"""
-Command-line interface for assessing trained AEV-PLIG models on test datasets.
-
-This module provides functionality to evaluate pre-trained models on benchmark datasets such as
-FEP benchmark and CASF2016, generating performance metrics and saving results to CSV files.
-"""
+from aev_plig.utils import utils
 
 
-def parse_command_line_arguments() -> argparse.Namespace:
+def initialize(args) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Assess trained AEV-PLIG models on benchmark test datasets",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    
-    # Required arguments
     parser.add_argument(
-        '-m', '--model_path',
-        required=True,
-        help="Path to trained model file, e.g. /home/foo.model"
+        "-md",
+        "--model_dir",
+        default='outputs',
+        help="Directory containing trained model files and the pickled scaler file shared by the models. \
+            The default is 'outputs'."
+    )
+    parser.add_argument(
+        "-tr",
+        "--train_dataset",
+        default='data/processed/dataset_train.pt',
+        help="The path to the PyTorch file of the training set for scaling the test data.\
+            The default is 'data/processed/dataset_train.pt'."
+    )
+    parser.add_argument(
+        "-t",
+        "--test_dataset",
+        default='data/processed/dataset_test.pt',
+        help="The path to the PyTorch file of the test set. The default is 'data/processed/dataset_test.pt'."
+    )
+    parser.add_argument(
+        '-hd',
+        '--hidden_dim',
+        type=int,
+        default=256,
+        help='The hidden dimension size. The default is 256.'
+    )
+    parser.add_argument(
+        '-nh',
+        '--n_heads',
+        type=int,
+        default=3,
+        help='The number of attention heads. The default is 3.'
+    )
+    parser.add_argument(
+        '-a',
+        '--act_fn',
+        type=str,
+        default='leaky_relu',
+        help='The activation function. The default is leaky_relu.'
+    )
+    parser.add_argument(
+        '-o',
+        '--output_csv',
+        default='assess_trained_models.csv',
+        help="The path to the output CSV file where the assessment results will be saved. \
+            The default is assess_trained_models.csv."
+    )
+    parser.add_argument(
+        '-l',
+        '--log',
+        type=str,
+        default='assess_trained_models.log',
+        help="The path to the log file. The default is assessed_trained_models.log."
     )
 
-    parser.add_argument(
-        '-s', '--scaler_path',
-        required=True,
-        help="Path to scaler pickle, e.g. /home/foo.pickle"
-    )
-    
-    parser.add_argument(
-        '-d', '--data_root',
-        required=True,
-        help="Root directory containing test and training dataset .pt files"
-    )
-    
-    # Optional arguments
-    parser.add_argument(
-        '-t', '--test_dataset',
-        nargs='+',  # Allow multiple arguments
-        default=['dataset_test'],
-        help="Name(s) of test dataset(s). Can specify multiple datasets separated by spaces."
-    )
-
-    parser.add_argument(
-        '-r', '--train_dataset',
-        default='dataset_train',
-        help="Name of train dataset. The train dataset is used for scaling the test data to have mean=0, stddev=1."
-    )
-
-    parser.add_argument(
-        '-o', '--output_path',
-        default='./',
-        help="Directory to output CSV file containing results, defaults to working directory"
-    )
-
-    parser.add_argument(
-        '-l', '--log_file',
-        help="Path to log file (if not specified, logs only to console)"
-    )
-    
-    parser.add_argument(
-        '--device',
-        default='cuda',
-        choices=['cpu', 'cuda'],
-        help="Device to use for model inference"
-    )
-    
-    return parser.parse_args()
-
-
-def setup_logging(log_file: Optional[str] = None) -> logging.Logger:
-    """
-    Set up logging configuration for the assessment process.
-    
-    Args:
-        log_file: Optional path to log file. If None, logs only to console.
-        
-    Returns:
-        Configured logger instance.
-    """
-    logger = logging.getLogger('assess_model')
-    logger.setLevel(logging.INFO)
-    
-    # Create formatter for log messages
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
-    # Console handler - always present
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-    
-    # File handler - optional
-    if log_file:
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-    
-    return logger
+    args = parser.parse_args(args)
+    return args
 
 
 def load_trained_model(model_path: str, scaler_path: str, num_node_features: int, 
-                      num_edge_features: int, device: torch.device) -> Tuple[GATv2Net, Any]:
+                      num_edge_features: int, device: torch.device, config: argparse.Namespace) -> Tuple[GATv2Net, Any]:
     """
     Load a pre-trained AEV-PLIG model and its associated scaler.
     
-    Args:
-        model_path: Path to the trained model file (.model extension)
-        scaler_path: Path to the scaler pickle file 
-        num_node_features: Number of node features in the graph data
-        num_edge_features: Number of edge features in the graph data
-        device: PyTorch device to load the model on
+    Parameters
+    ----------
+    model_path : str
+        Path to the trained model file (.model extension).
+    scaler_path : str  
+        Path to the scaler pickle file.
+    num_node_features : int
+        Number of node features in the graph data
+    num_edge_features : int
+        Number of edge features in the graph data
+    device : str
+        PyTorch device to load the model on. The values should be 'cpu' or 'cuda'.
+    config : argparse.Namespace
+        Configuration parameters for the GATv2Net model, including hidden_dim, n_heads, and act_fn.
         
-    Returns:
-        Tuple of (loaded model, loaded scaler)
-        
-    Raises:
-        FileNotFoundError: If model or scaler files don't exist
-        RuntimeError: If model loading fails
-    """
-    # Verify files exist before attempting to load
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model file not found: {model_path}")
-    if not os.path.exists(scaler_path):
-        raise FileNotFoundError(f"Scaler file not found: {scaler_path}")
-    
-    # Create model configuration - these should ideally be stored with the model
-    # For now, using default values that match the example
-    config = argparse.Namespace(
-        hidden_dim=256,
-        n_heads=3,
-        act_fn='leaky_relu'
-    )
-    
-    # Initialize model architecture
+    Returns
+    -------
+    model : GATv2Net
+        The loaded GATv2Net model with trained weights.
+    scaler : Any
+        The scaler used during training, typically a StandardScaler or similar.
+    """    
     model = GATv2Net(
         node_feature_dim=num_node_features,
         edge_feature_dim=num_edge_features,
         config=config
     )
+
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.to(device)
+    model.eval()
     
-    # Load trained model weights
-    try:
-        model.load_state_dict(torch.load(model_path, map_location=device))
-        model.to(device)
-        model.eval()  # Set to evaluation mode
-    except Exception as e:
-        raise RuntimeError(f"Failed to load model from {model_path}: {str(e)}")
-    
-    # Load the scaler used during training
-    try:
-        with open(scaler_path, 'rb') as handle:
-            scaler = pickle.load(handle)
-    except Exception as e:
-        raise RuntimeError(f"Failed to load scaler from {scaler_path}: {str(e)}")
-    
+    with open(scaler_path, 'rb') as handle:
+        scaler = pickle.load(handle)
+
     return model, scaler
 
-def load_test_dataset(data_root: str, testset_name: str, trainset_name: str) -> Tuple[nn_utils.GraphDataset, DataLoader]:
-    """
-    Load test dataset and create DataLoader for model evaluation.
-    
-    Args:
-        data_root: Root directory containing the dataset files
-        testset_name: Name of the test dataset
-        trainset_name: Name of the train dataset
 
-    Returns:
-        Tuple of (test dataset, test data loader)
-        
-    Raises:
-        RuntimeError: If dataset loading fails
+def make_predictions(model: GATv2Net, device: torch.device, data_loader: DataLoader, scaler: Any) -> Tuple[List[float], List[float], List[int]]:
     """
-    try:
-        train_data = nn_utils.GraphDataset(root=data_root, dataset=trainset_name, y_scaler=None)
-
-        test_data = nn_utils.GraphDataset(
-            root=data_root,
-            dataset=testset_name,
-            y_scaler=train_data.y_scaler
-        )
+    Make predictions using the trained model on the provided data loader.
+    
+    Parameters
+    ----------
+    model : GATv2Net
+        The trained GATv2Net model.
+    device : torch.device
+        The device to run the model on (CPU or GPU).
+    data_loader : DataLoader
+        DataLoader containing the test dataset.
+    scaler : Any
+        Scaler used to transform the target variable during training.
         
-        test_loader = DataLoader(
-            test_data,
-            batch_size=128,
-            shuffle=False
-        )
-        
-        return test_data, test_loader
-        
-    except Exception as e:
-        raise RuntimeError(f"Failed to load dataset info from {data_root}: {str(e)}")
-
-
-def save_results_to_csv(y_true: List[float], y_pred: List[float], group_ids: List[str],
-                       metrics: Dict[str, float], output_path: str, logger: logging.Logger,
-                       model_path: str, testset_name: str) -> None:
+    Returns
+    -------
+    df_results : pd.DataFrame
+        DataFrame containing the true values, predicted values, group IDs, absolute errors, and squared errors.
     """
-    Save assessment results to a CSV file.
-    
-    This function creates a CSV output containing individual predictions
-    and overall performance metrics. This approach is more elegant than iterative
-    writing as it allows for better data organization and atomic file operations.
-    
-    Args:
-        y_true: True binding affinity values
-        y_pred: Predicted binding affinity values
-        group_ids: Group/complex identifiers
-        metrics: Dictionary of calculated performance metrics
-        output_path: Path where CSV file should be saved
-        logger: Logger for progress tracking
-        
-    Raises:
-        RuntimeError: If CSV writing fails
-    """
-    logger.info(f"Saving results to CSV file: {output_path}")
-    
-    try:
-        # Create main results DataFrame with individual predictions
-        results_df = pd.DataFrame({
-            'group_id': group_ids,
-            'true_value': y_true,
-            'predicted_value': y_pred,
-            'absolute_error': [abs(t - p) for t, p in zip(y_true, y_pred)],
-            'squared_error': [(t - p)**2 for t, p in zip(y_true, y_pred)]
-        })
-        
-        # Create summary metrics DataFrame
-        metrics_df = pd.DataFrame([metrics])
-        metrics_df.index = ['overall_metrics']
-        
-        # Generate filename based on model and testset names
-        model_name = Path(model_path).stem
-        output_dir = os.path.dirname(output_path)
-        filename = f"MODEL_{model_name}_TESTSET_{testset_name}.csv"
-        final_output_path = os.path.join(output_dir, filename)
-        
-        # Ensure output directory exists
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Write results to CSV
-        with open(final_output_path, 'w') as f:
-            # Write header comment
-            f.write("# AEV-PLIG Model Assessment Results\n")
-            f.write("# Generated by assess_model.py\n\n")
-            
-            # Write overall metrics section
-            f.write("# Overall Performance Metrics\n")
-            metrics_df.to_csv(f, index_label='metric_type')
-            f.write("\n")
-            
-            # Write individual predictions section  
-            f.write("# Individual Predictions\n")
-            results_df.to_csv(f, index=False)
-        
-        logger.info(f"Successfully saved {len(results_df)} predictions and metrics to {final_output_path}")
-        
-    except Exception as e:
-        raise RuntimeError(f"Failed to save results to CSV: {str(e)}")
+    y_true, y_pred, group_ids = predict(model, device, data_loader, scaler)
+    err_abs = [abs(t - p) for t, p in zip(y_true, y_pred)]
+    err_sq = [(t - p)**2 for t, p in zip(y_true, y_pred)]
+    df_results = pd.DataFrame({
+        'y_true': y_true,
+        'y_pred': y_pred,
+        'group_id': group_ids,
+        'absolute_error': err_abs,
+        'squared_error': err_sq
+    })
 
-def assess_single_dataset(model: GATv2Net, scaler: Any, device: torch.device,
-                         data_root: str, testset_name: str, trainset_name: str,
-                         model_path: str, output_path: str, logger: logging.Logger) -> None:
-    """
-    Assess model on a single test dataset.
-    
-    Args:
-        model: Trained model
-        scaler: Scaler used during training
-        device: PyTorch device
-        data_root: Root directory containing datasets
-        testset_name: Name of test dataset
-        trainset_name: Name of train dataset
-        model_path: Path to model file (for output naming)
-        output_path: output path
-        logger: Logger instance
-    """
-    logger.info(f"Assessing model on dataset: {testset_name}")
-    
-    try:
-        # Load test dataset
-        test_data, test_loader = load_test_dataset(data_root, testset_name, trainset_name)
-        
-        # Run model assessment
-        logger.info(f"Running predictions on {testset_name}...")
-        y_true, y_pred, group_ids = predict(model, device, test_loader, scaler)
-        
-        logger.info(f"Completed predictions for {testset_name}")
-        logger.info(f"True values range: {min(y_true):.4f} to {max(y_true):.4f}")
-        logger.info(f"Predicted values range: {min(y_pred):.4f} to {max(y_pred):.4f}")
-        
-        # Calculate performance metrics
-        metrics = calc_metrics.MetricCalculator(y_pred, y_true, group_ids)
-        metrics_dict = {
-            'pearson_correlation': metrics.pearson(),
-            'dataset_name': testset_name,
-            'num_samples': len(y_true)
-        }
-        
-        # print('Pearson correlation:', metrics.pearson())
-        logger.info(f'Pearson correlation for {testset_name}: {metrics.pearson()}')
-        
-        # Save results to CSV
-        save_results_to_csv(y_true, y_pred, group_ids, metrics_dict, output_path, logger, model_path, testset_name)
-        
-        logger.info(f"Results for {testset_name} saved to: {output_path}")
-        
-    except Exception as e:
-        logger.error(f"Failed to assess dataset {testset_name}: {str(e)}")
-        raise
+    return df_results
 
+
+def assess_ensemble(df_results_list: List[pd.DataFrame]) -> pd.DataFrame:
+    """
+    Assess the ensemble of predictions from multiple models.
+    
+    Parameters
+    ----------
+    df_results_list : List[pd.DataFrame]
+        List of DataFrames containing predictions from different models.
+        
+    Returns
+    -------
+    df_ensemble : pd.DataFrame
+        DataFrame containing the ensemble predictions.
+    """
+    y_pred_ensemble = list(np.mean([df['y_pred'] for df in df_results_list], axis=0))
+    y_true = df_results_list[0]['y_true']  # assumed same across all models
+    group_ids = df_results_list[0]['group_id'] # assumed same across all models
+    err_abs = [abs(t - p) for t, p in zip(y_true, y_pred_ensemble)]
+    err_sq = [(t - p)**2 for t, p in zip(y_true, y_pred_ensemble)]
+    
+    df_ensemble = pd.DataFrame({
+        'y_true': y_true,
+        'y_pred': y_pred_ensemble,
+        'group_id': group_ids,
+        'absolute_error': err_abs,
+        'squared_error': err_sq
+    })
+    df_ensemble.insert(0, 'model', 'ensemble')
+
+    return df_ensemble
 
 def main():
-    """
-    Main function orchestrating the model assessment workflow.
+    t0 = time.time()
+    args = initialize(sys.argv[1:])
+    sys.stdout = utils.Logger(args.log)
+    sys.stderr = utils.Logger(args.log)
+
+    print(f"Version of aev_plig: {aev_plig.__version__}")
+    print(f"Command line: {' '.join(sys.argv)}")
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Current time: {datetime.datetime.now()}")
     
-    This function coordinates all the steps needed to assess a trained model:
-    1. Parse command line arguments
-    2. Set up logging
-    3. Load trained model and test data
-    4. Run model assessment 
-    5. Calculate performance metrics
-    6. Save results to CSV
-    """
-    # Parse command line arguments
-    args = parse_command_line_arguments()
+    model_paths = natsort.natsorted(glob.glob(os.path.join(args.model_dir, '*.model')))
+    print(f"\nFound {len(model_paths)} model files in directory {args.model_dir}:")
+    for i in range(len(model_paths)):
+        print(f"  {os.path.basename(model_paths[i])}")
     
-    # Set up logging
-    logger = setup_logging(args.log_file)
-    logger.info("Starting AEV-PLIG model assessment")
-    
-    # Convert single dataset to list
-    test_datasets = args.test_dataset if isinstance(args.test_dataset, list) else [args.test_dataset]
-    logger.info(f"Will assess model on {len(test_datasets)} dataset(s): {', '.join(test_datasets)}")
-    
-    try:
-        # Set up computation device
-        if args.device == 'cuda' and torch.cuda.is_available():
-            device = torch.device('cuda')
-            logger.info("Using CUDA for inference")
-        else:
-            device = torch.device('cpu')
-            logger.info("Using CPU for inference")
-        
-        # Load test dataset first to get feature dimensions
-        logger.info("Loading test dataset...")
-        # We need to load with a dummy scaler first to get dimensions
-        test_data, _ = load_test_dataset(args.data_root, test_datasets[0], args.train_dataset)
-        
-        # Load trained model and scaler
-        logger.info("Loading trained model...")
+    scaler_path = glob.glob(os.path.join(args.model_dir, '*.pickle'))
+    assert len(scaler_path) == 1, f"Expected exactly one scaler file in {args.model_dir} shared by the models, found {len(scaler_path)}"
+    scaler_path = scaler_path[0]
+    print(f"\nFound the scaler file in directory {args.model_dir}: {os.path.basename(scaler_path)}\n")
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    train_data = nn_utils.GraphDataset(
+        root=os.path.dirname(os.path.dirname(args.train_dataset)),
+        dataset=os.path.splitext(os.path.basename(args.train_dataset))[0],
+        y_scaler=None
+    )
+    test_data = nn_utils.GraphDataset(
+        root=os.path.dirname(os.path.dirname(args.test_dataset)),
+        dataset=os.path.splitext(os.path.basename(args.test_dataset))[0],
+        y_scaler=train_data.y_scaler
+    )
+    test_loader = DataLoader(test_data, batch_size=128, shuffle=False)
+
+    config = argparse.Namespace(
+        hidden_dim=args.hidden_dim,
+        n_heads=args.n_heads,
+        act_fn=args.act_fn
+    )
+
+    df_results_list = []
+    for i in range(len(model_paths)):
+        print(f"\n🔍 Assessing model {i+1}/{len(model_paths)}: {os.path.basename(model_paths[i])} ...")
+        print(f"   Loading the trained model and scaler file ...")
         model, scaler = load_trained_model(
-            args.model_path,
-            args.scaler_path,
+            model_paths[i],
+            scaler_path,
             test_data.num_node_features,
             test_data.num_edge_features,
-            device
+            device,
+            config
         )
+        df_results = make_predictions(model, device, test_loader, scaler)
+        df_results.insert(0, 'model', os.path.basename(model_paths[i]).split('.')[0])
+        df_results_list.append(df_results)
 
-        # Assess model on each test dataset
-        successful_assessments = 0
-        for testset_name in test_datasets:
-            try:
-                assess_single_dataset(
-                    model, scaler, device,
-                    args.data_root, testset_name, args.train_dataset,
-                    args.model_path, args.output_path, logger
-                )
-                successful_assessments += 1
-            except Exception as e:
-                logger.error(f"Failed to assess dataset {testset_name}: {str(e)}")
-                # Continue with other datasets rather than failing completely
-                continue
-        
-        logger.info(f"Model assessment completed successfully for {successful_assessments}/{len(test_datasets)} datasets")
-        
-        if successful_assessments == 0:
-            raise RuntimeError("All dataset assessments failed")
+        metrics = calc_metrics.MetricCalculator(
+            df_results['y_true'].tolist(),
+            df_results['y_pred'].tolist(),
+            None if df_results['group_id'].isnull().all() else df_results['group_id'].tolist()
+        )
+        all_metrics = metrics.all_metrics()
+        print(f"\n   Metrics for model {i+1}:")
+        print(f"     - RMSE: {all_metrics['rmse'][0]:.7f}")
+        print(f"     - Pearson correlation: {all_metrics['pearson'][0]:.7f}")
+        print(f"     - Kendall's tau correlation: {all_metrics['kendall'][0]:.7f}")
+        print(f"     - Spearman correlation: {all_metrics['spearman'][0]:.7f}")
+        print(f"     - C-index: {all_metrics['c_index'][0]:.7f}")
 
-        
-        logger.info("Model assessment completed successfully")
-        
-    except Exception as e:
-        logger.error(f"Model assessment failed: {str(e)}")
-        raise
+    if len(model_paths) > 1:
+        df_ensemble = assess_ensemble(df_results_list)
+        df_results_list.append(df_ensemble)
+        metrics = calc_metrics.MetricCalculator(
+            df_ensemble['y_true'].tolist(),
+            df_ensemble['y_pred'].tolist(),
+            None if df_ensemble['group_id'].isnull().all() else df_ensemble['group_id'].tolist()
+        )
+        all_metrics = metrics.all_metrics()
+        section_str = "\nTest results for the ensemble model"
+        print(section_str + "\n" + "=" * (len(section_str) - 1))
+        print(f"RMSE: {all_metrics['rmse'][0]:.7f}")
+        print(f"Pearson correlation: {all_metrics['pearson'][0]:.7f}")
+        print(f"Kendall's tau correlation: {all_metrics['kendall'][0]:.7f}")
+        print(f"Spearman correlation: {all_metrics['spearman'][0]:.7f}")
+        print(f"C-index: {all_metrics['c_index'][0]:.7f}")
 
-
-if __name__ == "__main__":
-    main()
+    df = pd.concat(df_results_list, ignore_index=True)
+    df.to_csv(args.output_csv, index=False)
+    print(f"\nPredictions saved to {args.output_csv}")
