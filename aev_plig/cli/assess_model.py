@@ -27,19 +27,20 @@ def initialize(args) -> argparse.Namespace:
         "--model_dir",
         default='outputs',
         help="Directory containing trained model files and the pickled scaler file shared by the models. \
-            If not specified, the current working directory is used."
+            The default is 'outputs'."
     )
     parser.add_argument(
         "-tr",
         "--train_dataset",
         default='data/processed/dataset_train.pt',
-        help="The path to the PyTorch file of the training set for scaling the test data."
+        help="The path to the PyTorch file of the training set for scaling the test data.\
+            The default is 'data/processed/dataset_train.pt'."
     )
     parser.add_argument(
         "-t",
         "--test_dataset",
         default='data/processed/dataset_test.pt',
-        help="The path to the PyTorch file of the test set."
+        help="The path to the PyTorch file of the test set. The default is 'data/processed/dataset_test.pt'."
     )
     parser.add_argument(
         '-hd',
@@ -74,7 +75,7 @@ def initialize(args) -> argparse.Namespace:
         '--log',
         type=str,
         default='assess_trained_models.log',
-        help="The path to the log file. The default is train_aev_plig.log."
+        help="The path to the log file. The default is assessed_trained_models.log."
     )
 
     args = parser.parse_args(args)
@@ -259,21 +260,22 @@ def main():
         print(f"     - Spearman correlation: {all_metrics['spearman'][0]:.7f}")
         print(f"     - C-index: {all_metrics['c_index'][0]:.7f}")
 
-    df_ensemble = assess_ensemble(df_results_list)
-    df_results_list.append(df_ensemble)
-    metrics = calc_metrics.MetricCalculator(
-        df_ensemble['y_true'].tolist(),
-        df_ensemble['y_pred'].tolist(),
-        None if df_ensemble['group_id'].isnull().all() else df_ensemble['group_id'].tolist()
-    )
-    all_metrics = metrics.all_metrics()
-    section_str = "\nTest results for the ensemble model"
-    print(section_str + "\n" + "=" * (len(section_str) - 1))
-    print(f"RMSE: {all_metrics['rmse'][0]:.7f}")
-    print(f"Pearson correlation: {all_metrics['pearson'][0]:.7f}")
-    print(f"Kendall's tau correlation: {all_metrics['kendall'][0]:.7f}")
-    print(f"Spearman correlation: {all_metrics['spearman'][0]:.7f}")
-    print(f"C-index: {all_metrics['c_index'][0]:.7f}")
+    if len(model_paths) > 1:
+        df_ensemble = assess_ensemble(df_results_list)
+        df_results_list.append(df_ensemble)
+        metrics = calc_metrics.MetricCalculator(
+            df_ensemble['y_true'].tolist(),
+            df_ensemble['y_pred'].tolist(),
+            None if df_ensemble['group_id'].isnull().all() else df_ensemble['group_id'].tolist()
+        )
+        all_metrics = metrics.all_metrics()
+        section_str = "\nTest results for the ensemble model"
+        print(section_str + "\n" + "=" * (len(section_str) - 1))
+        print(f"RMSE: {all_metrics['rmse'][0]:.7f}")
+        print(f"Pearson correlation: {all_metrics['pearson'][0]:.7f}")
+        print(f"Kendall's tau correlation: {all_metrics['kendall'][0]:.7f}")
+        print(f"Spearman correlation: {all_metrics['spearman'][0]:.7f}")
+        print(f"C-index: {all_metrics['c_index'][0]:.7f}")
 
     df = pd.concat(df_results_list, ignore_index=True)
     df.to_csv(args.output_csv, index=False)
