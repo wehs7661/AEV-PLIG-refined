@@ -125,7 +125,7 @@ def load_trained_model(model_path: str, scaler_path: str, num_node_features: int
     return model, scaler
 
 
-def make_predictions(model: GATv2Net, device: torch.device, data_loader: DataLoader, scaler: Any) -> Tuple[List[float], List[float], List[int]]:
+def make_predictions(model: GATv2Net, device: torch.device, data_loader: DataLoader, scaler: Any) -> pd.DataFrame:
     """
     Make predictions using the trained model on the provided data loader.
     
