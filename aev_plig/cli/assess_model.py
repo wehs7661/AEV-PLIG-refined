@@ -196,6 +196,10 @@ def main():
     sys.stdout = utils.Logger(args.log)
     sys.stderr = utils.Logger(args.log)
 
+    # check if the pt files exist
+    assert os.path.isfile(args.train_dataset), f"Training dataset file {args.train_dataset} does not exist."
+    assert os.path.isfile(args.test_dataset), f"Test dataset file {args.test_dataset} does not exist."
+
     print(f"Version of aev_plig: {aev_plig.__version__}")
     print(f"Command line: {' '.join(sys.argv)}")
     print(f"Current working directory: {os.getcwd()}")
