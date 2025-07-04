@@ -34,16 +34,6 @@ def initialize(args):
             'ligand_path', 'pK', and 'split'. The 'system_id' column should contain the same IDs as the pickled graphs."
     )
     parser.add_argument(
-        "-f",
-        "--filters",
-        nargs='+',
-        type=str,
-        help="The filters to apply to the dataset before splitting it. The filters are in the format of \
-            'column_name operator value'. For example, 'max_tanimoto_schrodinger < 0.9' will filter out entries \
-            with column 'max_tanimoto_schrodinger' larger than 0.9. The operators include '<', '<=', '>', \
-            '>=', '==', and '!='."
-    )
-    parser.add_argument(
         "-p",
         "--prefix",
         type=str,
@@ -97,12 +87,6 @@ def main():
     for csv_file in args.csv_files:
         print(f"Processing {csv_file}...")
         csv_data = pd.read_csv(csv_file)
-        if args.filters:
-            original_count = len(csv_data)
-            for filter_str in args.filters:
-                column, operator, value = utils.parse_filter(filter_str)
-                csv_data = utils.apply_filter(csv_data, column, operator, value)
-            print(f"Applied filters: {original_count} -> {len(csv_data)} entries")
         
         if 'group_id' not in csv_data.columns:
             csv_data['group_id'] = None
