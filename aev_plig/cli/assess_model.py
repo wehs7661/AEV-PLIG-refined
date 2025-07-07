@@ -43,6 +43,20 @@ def initialize(args) -> argparse.Namespace:
         help="The path to the PyTorch file of the test set. The default is 'data/processed/dataset_test.pt'."
     )
     parser.add_argument(
+        '-o',
+        '--output_csv',
+        default='assess_trained_models.csv',
+        help="The path to the output CSV file where the assessment results will be saved. \
+            The default is assess_trained_models.csv."
+    )
+    parser.add_argument(
+        '-l',
+        '--log',
+        type=str,
+        default='assess_trained_models.log',
+        help="The path to the log file. The default is assessed_trained_models.log."
+    )
+    parser.add_argument(
         '-hd',
         '--hidden_dim',
         type=int,
@@ -64,18 +78,18 @@ def initialize(args) -> argparse.Namespace:
         help='The activation function. The default is leaky_relu.'
     )
     parser.add_argument(
-        '-o',
-        '--output_csv',
-        default='assess_trained_models.csv',
-        help="The path to the output CSV file where the assessment results will be saved. \
-            The default is assess_trained_models.csv."
+        '-ni',
+        '--n_iterations',
+        type=int,
+        default=1000,
+        help='The number of bootstrap iterations to perform for wPCC uncertainty calculation. The default is 10000.'
     )
     parser.add_argument(
-        '-l',
-        '--log',
-        type=str,
-        default='assess_trained_models.log',
-        help="The path to the log file. The default is assessed_trained_models.log."
+        '-nm',
+        '--n_min',
+        type=int,
+        default=10,
+        help='The minimum number of samples required in a group to include group PCC (during each bootstrapping iteration). The default is 10.'
     )
 
     args = parser.parse_args(args)
@@ -190,6 +204,90 @@ def assess_ensemble(df_results_list: List[pd.DataFrame]) -> pd.DataFrame:
 
     return df_ensemble
 
+def bootstrap_wpcc_uncertainty(df_results: pd.DataFrame, n_iterations: int = 10000, n_min: int = 10) -> dict:
+    """
+    Calculate the uncertainty of weighted PCC (wPCC) using bootstrapping by sampling complexes.
+    
+    Parameters
+    ----------
+    df_results : pd.DataFrame
+        DataFrame containing predictions with columns: y_true, y_pred, group_id, model
+    n_iterations : int, optional
+        Number of bootstrap iterations to perform. Default is 10000.
+    n_min : int, optional
+        The minimum number of samples required in each group to calculate the metrics. If a group has fewer
+        samples than this, it will be skipped. Default is 10.
+        
+    Returns
+    -------
+    bootstrap_results : dict
+        Dictionary with model names as keys and bootstrap statistics as values.
+        Each value contains mean, std, and 95% confidence intervals for wPCC.
+    """
+    bootstrap_results = {}
+    
+    # Get models
+    models = df_results['model'].unique()
+    
+    # Iterate over groups (calculating PCC's), then over iterations (calculating wPCC's), then over models
+    for model in models:
+        model_data = df_results[df_results['model'] == model].copy()
+        n_complexes = len(model_data)
+        bootstrap_wpcc_values = np.zeros(n_iterations)
+        
+        for i in range(n_iterations):
+            # Sample complexes with replacement
+            bootstrap_indices = np.random.choice(n_complexes, size=n_complexes, replace=True)
+            bootstrap_sample = model_data.iloc[bootstrap_indices]
+            
+            # Initialise PCC and weights for current iteration
+            family_pccs = []
+            family_weights = []
+
+            # Calculate PCC for each protein family in this bootstrap sample
+            for group_id in bootstrap_sample['group_id'].unique():
+                if pd.isna(group_id):
+                    print("group_id has NaN value") # notify the user so that we don't ignore these silently
+                    continue
+                    
+                group_data = bootstrap_sample[bootstrap_sample['group_id'] == group_id]
+                if len(group_data) >= n_min:  # Only process groups with at least n_min samples
+                    pcc = np.corrcoef(group_data['y_true'], group_data['y_pred'])[0, 1]
+                    if not np.isnan(pcc):
+                        family_pccs.append(pcc)
+                        family_weights.append(len(group_data))
+            
+            # Calculate wPCC
+            if family_pccs:
+                family_pccs = np.array(family_pccs)
+                family_weights = np.array(family_weights)
+                wpcc = np.sum(family_pccs * family_weights) / np.sum(family_weights)
+                bootstrap_wpcc_values[i] = wpcc
+            else:
+                print(f"wPCC calculation returned NaN at bootstrap iteration {i}: are group id's missing, or n_min = {n_min} set too high?")
+                bootstrap_wpcc_values[i] = np.nan
+        
+        # Remove NaN values
+        valid_values = bootstrap_wpcc_values[~np.isnan(bootstrap_wpcc_values)]
+        
+        if len(valid_values) > 0:
+            bootstrap_results[model] = {
+                'mean': np.mean(valid_values),
+                'std': np.std(valid_values),
+                'ci_lower': np.percentile(valid_values, 2.5),
+                'ci_upper': np.percentile(valid_values, 97.5)
+            }
+        else:
+            print(f"all bootstrap iterations for model {model} returned NaN")
+            bootstrap_results[model] = {
+                'mean': np.nan,
+                'std': np.nan,
+                'ci_lower': np.nan,
+                'ci_upper': np.nan
+            }
+    
+    return bootstrap_results
+
 def main():
     t0 = time.time()
     args = initialize(sys.argv[1:])
@@ -284,3 +382,16 @@ def main():
     df = pd.concat(df_results_list, ignore_index=True)
     df.to_csv(args.output_csv, index=False)
     print(f"\nPredictions saved to {args.output_csv}")
+
+    if not df['group_id'].isnull().all():
+        print(f"\nPerforming bootstrapping to calculate wPCC uncertainty with {args.n_iterations} iterations...")
+        bootstrap_results = bootstrap_wpcc_uncertainty(df, args.n_iterations, args.n_min)
+        
+        print("\nBootstrap results for wPCC uncertainty:")
+        for model, results in bootstrap_results.items():
+            print(f"  {model}:")
+            print(f"    Mean wPCC: {results['mean']:.4f}")
+            print(f"    Std wPCC: {results['std']:.4f}")
+            print(f"    95% CI: [{results['ci_lower']:.4f}, {results['ci_upper']:.4f}]")
+    else:
+        print("\nSkipping bootstrapping: no group_id information available in dataset.")
