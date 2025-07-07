@@ -211,7 +211,7 @@ def bootstrap_wpcc_uncertainty(df_results: pd.DataFrame, n_iterations: int = 100
     Parameters
     ----------
     df_results : pd.DataFrame
-        DataFrame containing predictions with columns: y_true, y_pred, group_id, model
+        DataFrame containing predictions with columns: y_true, y_pred, group_id
     n_iterations : int, optional
         Number of bootstrap iterations to perform. Default is 10000.
     n_min : int, optional
@@ -221,25 +221,20 @@ def bootstrap_wpcc_uncertainty(df_results: pd.DataFrame, n_iterations: int = 100
     Returns
     -------
     bootstrap_results : dict
-        Dictionary with model names as keys and bootstrap statistics as values.
-        Each value contains mean, std, and 95% confidence intervals for wPCC.
+        Dictionary with bootstrap statistics containing mean, std, and 95% confidence intervals for wPCC.
     """
-    bootstrap_results = {}
+    n_complexes = len(df_results)
+    bootstrap_wpcc_values = np.zeros(n_iterations)
     
-    # Get models
-    models = df_results['model'].unique()
+    # Check if group_id information is available
+    has_group_ids = not df_results['group_id'].isnull().all()
     
-    # Iterate over groups (calculating PCC's), then over iterations (calculating wPCC's), then over models
-    for model in models:
-        model_data = df_results[df_results['model'] == model].copy()
-        n_complexes = len(model_data)
-        bootstrap_wpcc_values = np.zeros(n_iterations)
+    for i in range(n_iterations):
+        # Sample complexes with replacement
+        bootstrap_indices = np.random.choice(n_complexes, size=n_complexes, replace=True)
+        bootstrap_sample = df_results.iloc[bootstrap_indices]
         
-        for i in range(n_iterations):
-            # Sample complexes with replacement
-            bootstrap_indices = np.random.choice(n_complexes, size=n_complexes, replace=True)
-            bootstrap_sample = model_data.iloc[bootstrap_indices]
-            
+        if has_group_ids:
             # Initialise PCC and weights for current iteration
             family_pccs = []
             family_weights = []
@@ -264,29 +259,31 @@ def bootstrap_wpcc_uncertainty(df_results: pd.DataFrame, n_iterations: int = 100
                 wpcc = np.sum(family_pccs * family_weights) / np.sum(family_weights)
                 bootstrap_wpcc_values[i] = wpcc
             else:
-                print(f"wPCC calculation returned NaN at bootstrap iteration {i}: are group id's missing, or n_min = {n_min} set too high?")
+                print(f"wPCC calculation returned NaN at bootstrap iteration {i}: is n_min = {n_min} set too high?")
                 bootstrap_wpcc_values[i] = np.nan
-        
-        # Remove NaN values
-        valid_values = bootstrap_wpcc_values[~np.isnan(bootstrap_wpcc_values)]
-        
-        if len(valid_values) > 0:
-            bootstrap_results[model] = {
-                'mean': np.mean(valid_values),
-                'std': np.std(valid_values),
-                'ci_lower': np.percentile(valid_values, 2.5),
-                'ci_upper': np.percentile(valid_values, 97.5)
-            }
         else:
-            print(f"all bootstrap iterations for model {model} returned NaN")
-            bootstrap_results[model] = {
-                'mean': np.nan,
-                'std': np.nan,
-                'ci_lower': np.nan,
-                'ci_upper': np.nan
-            }
+            # Calculate overall PCC when no group_id information is available
+            pcc = np.corrcoef(bootstrap_sample['y_true'], bootstrap_sample['y_pred'])[0, 1]
+            bootstrap_wpcc_values[i] = pcc if not np.isnan(pcc) else np.nan
     
-    return bootstrap_results
+    # Remove NaN values
+    valid_values = bootstrap_wpcc_values[~np.isnan(bootstrap_wpcc_values)]
+    
+    if len(valid_values) > 0:
+        return {
+            'mean': np.mean(valid_values),
+            'std': np.std(valid_values),
+            'ci_lower': np.percentile(valid_values, 2.5),
+            'ci_upper': np.percentile(valid_values, 97.5)
+        }
+    else:
+        print(f"all bootstrap iterations returned NaN")
+        return {
+            'mean': np.nan,
+            'std': np.nan,
+            'ci_lower': np.nan,
+            'ci_upper': np.nan
+        }
 
 def main():
     t0 = time.time()
@@ -355,12 +352,18 @@ def main():
             None if df_results['group_id'].isnull().all() else df_results['group_id'].tolist()
         )
         all_metrics = metrics.all_metrics()
+        
+        # Perform bootstrapping for wPCC uncertainty
+        print(f"   Performing bootstrapping to calculate wPCC uncertainty with {args.n_iterations} iterations...")
+        bootstrap_results = bootstrap_wpcc_uncertainty(df_results, args.n_iterations, args.n_min)
+        
         print(f"\n   Metrics for model {i+1}:")
         print(f"     - RMSE: {all_metrics['rmse'][0]:.7f}")
         print(f"     - Pearson correlation: {all_metrics['pearson'][0]:.7f}")
         print(f"     - Kendall's tau correlation: {all_metrics['kendall'][0]:.7f}")
         print(f"     - Spearman correlation: {all_metrics['spearman'][0]:.7f}")
         print(f"     - C-index: {all_metrics['c_index'][0]:.7f}")
+        print(f"     - wPCC (bootstrapped): {bootstrap_results['mean']:.7f} ± {bootstrap_results['std']:.7f}")
 
     if len(model_paths) > 1:
         df_ensemble = assess_ensemble(df_results_list)
@@ -371,6 +374,11 @@ def main():
             None if df_ensemble['group_id'].isnull().all() else df_ensemble['group_id'].tolist()
         )
         all_metrics = metrics.all_metrics()
+        
+        # Perform bootstrapping for ensemble wPCC uncertainty
+        print(f"\nPerforming bootstrapping for ensemble model with {args.n_iterations} iterations...")
+        bootstrap_results = bootstrap_wpcc_uncertainty(df_ensemble, args.n_iterations, args.n_min)
+        
         section_str = "\nTest results for the ensemble model"
         print(section_str + "\n" + "=" * (len(section_str) - 1))
         print(f"RMSE: {all_metrics['rmse'][0]:.7f}")
@@ -378,20 +386,8 @@ def main():
         print(f"Kendall's tau correlation: {all_metrics['kendall'][0]:.7f}")
         print(f"Spearman correlation: {all_metrics['spearman'][0]:.7f}")
         print(f"C-index: {all_metrics['c_index'][0]:.7f}")
+        print(f"wPCC (bootstrapped): {bootstrap_results['mean']:.7f} ± {bootstrap_results['std']:.7f}")
 
     df = pd.concat(df_results_list, ignore_index=True)
     df.to_csv(args.output_csv, index=False)
     print(f"\nPredictions saved to {args.output_csv}")
-
-    if not df['group_id'].isnull().all():
-        print(f"\nPerforming bootstrapping to calculate wPCC uncertainty with {args.n_iterations} iterations...")
-        bootstrap_results = bootstrap_wpcc_uncertainty(df, args.n_iterations, args.n_min)
-        
-        print("\nBootstrap results for wPCC uncertainty:")
-        for model, results in bootstrap_results.items():
-            print(f"  {model}:")
-            print(f"    Mean wPCC: {results['mean']:.4f}")
-            print(f"    Std wPCC: {results['std']:.4f}")
-            print(f"    95% CI: [{results['ci_lower']:.4f}, {results['ci_upper']:.4f}]")
-    else:
-        print("\nSkipping bootstrapping: no group_id information available in dataset.")
