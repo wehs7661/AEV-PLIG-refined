@@ -16,7 +16,14 @@ from aev_plig.model import GATv2Net
 from torch_geometric.loader import DataLoader
 from aev_plig.cli.train_aev_plig import predict
 from aev_plig.utils import utils
+import warnings
+from sklearn.exceptions import InconsistentVersionWarning
 
+# Suppress sklearn version warnings
+warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
+
+# Suppress PyTorch Geometric weights_only warning
+warnings.filterwarnings("ignore", message=".*Weights only load failed.*")
 
 def initialize(args) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -204,86 +211,6 @@ def assess_ensemble(df_results_list: List[pd.DataFrame]) -> pd.DataFrame:
 
     return df_ensemble
 
-def bootstrap_wpcc_uncertainty(df_results: pd.DataFrame, n_iterations: int = 10000, n_min: int = 10) -> dict:
-    """
-    Calculate the uncertainty of weighted PCC (wPCC) using bootstrapping by sampling complexes.
-    
-    Parameters
-    ----------
-    df_results : pd.DataFrame
-        DataFrame containing predictions with columns: y_true, y_pred, group_id
-    n_iterations : int, optional
-        Number of bootstrap iterations to perform. Default is 10000.
-    n_min : int, optional
-        The minimum number of samples required in each group to calculate the metrics. If a group has fewer
-        samples than this, it will be skipped. Default is 10.
-        
-    Returns
-    -------
-    bootstrap_results : dict
-        Dictionary with bootstrap statistics containing mean, std, and 95% confidence intervals for wPCC.
-    """
-    n_complexes = len(df_results)
-    bootstrap_wpcc_values = np.zeros(n_iterations)
-    
-    # Check if group_id information is available
-    has_group_ids = not df_results['group_id'].isnull().all()
-    
-    for i in range(n_iterations):
-        # Sample complexes with replacement
-        bootstrap_indices = np.random.choice(n_complexes, size=n_complexes, replace=True)
-        bootstrap_sample = df_results.iloc[bootstrap_indices]
-        
-        if has_group_ids:
-            # Initialise PCC and weights for current iteration
-            family_pccs = []
-            family_weights = []
-
-            # Calculate PCC for each protein family in this bootstrap sample
-            for group_id in bootstrap_sample['group_id'].unique():
-                if pd.isna(group_id):
-                    print("group_id has NaN value") # notify the user so that we don't ignore these silently
-                    continue
-                    
-                group_data = bootstrap_sample[bootstrap_sample['group_id'] == group_id]
-                if len(group_data) >= n_min:  # Only process groups with at least n_min samples
-                    pcc = np.corrcoef(group_data['y_true'], group_data['y_pred'])[0, 1]
-                    if not np.isnan(pcc):
-                        family_pccs.append(pcc)
-                        family_weights.append(len(group_data))
-            
-            # Calculate wPCC
-            if family_pccs:
-                family_pccs = np.array(family_pccs)
-                family_weights = np.array(family_weights)
-                wpcc = np.sum(family_pccs * family_weights) / np.sum(family_weights)
-                bootstrap_wpcc_values[i] = wpcc
-            else:
-                print(f"wPCC calculation returned NaN at bootstrap iteration {i}: is n_min = {n_min} set too high?")
-                bootstrap_wpcc_values[i] = np.nan
-        else:
-            # Calculate overall PCC when no group_id information is available
-            pcc = np.corrcoef(bootstrap_sample['y_true'], bootstrap_sample['y_pred'])[0, 1]
-            bootstrap_wpcc_values[i] = pcc if not np.isnan(pcc) else np.nan
-    
-    # Remove NaN values
-    valid_values = bootstrap_wpcc_values[~np.isnan(bootstrap_wpcc_values)]
-    
-    if len(valid_values) > 0:
-        return {
-            'mean': np.mean(valid_values),
-            'std': np.std(valid_values),
-            'ci_lower': np.percentile(valid_values, 2.5),
-            'ci_upper': np.percentile(valid_values, 97.5)
-        }
-    else:
-        print(f"all bootstrap iterations returned NaN")
-        return {
-            'mean': np.nan,
-            'std': np.nan,
-            'ci_lower': np.nan,
-            'ci_upper': np.nan
-        }
 
 def main():
     t0 = time.time()
@@ -346,47 +273,43 @@ def main():
         df_results.insert(0, 'model', os.path.basename(model_paths[i]).split('.')[0])
         df_results_list.append(df_results)
 
+        print(f"   Calculating metrics and performing bootstrapping with {args.n_iterations} iterations")
         metrics = calc_metrics.MetricCalculator(
             df_results['y_true'].tolist(),
             df_results['y_pred'].tolist(),
-            None if df_results['group_id'].isnull().all() else df_results['group_id'].tolist()
+            None if df_results['group_id'].isnull().all() else df_results['group_id'].tolist(),
+            n_min = args.n_min,
+            n_iterations = args.n_iterations
         )
         all_metrics = metrics.all_metrics()
         
-        # Perform bootstrapping for wPCC uncertainty
-        print(f"   Performing bootstrapping to calculate wPCC uncertainty with {args.n_iterations} iterations...")
-        bootstrap_results = bootstrap_wpcc_uncertainty(df_results, args.n_iterations, args.n_min)
-        
         print(f"\n   Metrics for model {i+1}:")
-        print(f"     - RMSE: {all_metrics['rmse'][0]:.7f}")
-        print(f"     - Pearson correlation: {all_metrics['pearson'][0]:.7f}")
-        print(f"     - Kendall's tau correlation: {all_metrics['kendall'][0]:.7f}")
-        print(f"     - Spearman correlation: {all_metrics['spearman'][0]:.7f}")
-        print(f"     - C-index: {all_metrics['c_index'][0]:.7f}")
-        print(f"     - wPCC (bootstrapped): {bootstrap_results['mean']:.7f} ± {bootstrap_results['std']:.7f}")
+        print(f"  - Test RMSE: {all_metrics['rmse'][0]:.7f} ± {all_metrics['rmse'][1]:.7f}")
+        print(f"  - Test Pearson correlation: {all_metrics['pearson'][0]:.7f} ± {all_metrics['pearson'][1]:.7f}")
+        print(f"  - Test Kendall's tau correlation: {all_metrics['kendall'][0]:.7f} ± {all_metrics['kendall'][1]:.7f}")
+        print(f"  - Test Spearman correlation: {all_metrics['spearman'][0]:.7f} ± {all_metrics['spearman'][1]:.7f}")
+        print(f"  - Test C-index: {all_metrics['c_index'][0]:.7f} ± {all_metrics['c_index'][1]:.7f}")
 
     if len(model_paths) > 1:
         df_ensemble = assess_ensemble(df_results_list)
         df_results_list.append(df_ensemble)
+        print(f"   Calculating metrics and performing bootstrapping with {args.n_iterations} iterations for ensemble model")
         metrics = calc_metrics.MetricCalculator(
             df_ensemble['y_true'].tolist(),
             df_ensemble['y_pred'].tolist(),
-            None if df_ensemble['group_id'].isnull().all() else df_ensemble['group_id'].tolist()
+            None if df_ensemble['group_id'].isnull().all() else df_ensemble['group_id'].tolist(),
+            n_min = args.n_min,
+            n_iterations = args.n_iterations
         )
         all_metrics = metrics.all_metrics()
         
-        # Perform bootstrapping for ensemble wPCC uncertainty
-        print(f"\nPerforming bootstrapping for ensemble model with {args.n_iterations} iterations...")
-        bootstrap_results = bootstrap_wpcc_uncertainty(df_ensemble, args.n_iterations, args.n_min)
-        
         section_str = "\nTest results for the ensemble model"
         print(section_str + "\n" + "=" * (len(section_str) - 1))
-        print(f"RMSE: {all_metrics['rmse'][0]:.7f}")
-        print(f"Pearson correlation: {all_metrics['pearson'][0]:.7f}")
-        print(f"Kendall's tau correlation: {all_metrics['kendall'][0]:.7f}")
-        print(f"Spearman correlation: {all_metrics['spearman'][0]:.7f}")
-        print(f"C-index: {all_metrics['c_index'][0]:.7f}")
-        print(f"wPCC (bootstrapped): {bootstrap_results['mean']:.7f} ± {bootstrap_results['std']:.7f}")
+        print(f"  - Test RMSE: {all_metrics['rmse'][0]:.7f} ± {all_metrics['rmse'][1]:.7f}")
+        print(f"  - Test Pearson correlation: {all_metrics['pearson'][0]:.7f} ± {all_metrics['pearson'][1]:.7f}")
+        print(f"  - Test Kendall's tau correlation: {all_metrics['kendall'][0]:.7f} ± {all_metrics['kendall'][1]:.7f}")
+        print(f"  - Test Spearman correlation: {all_metrics['spearman'][0]:.7f} ± {all_metrics['spearman'][1]:.7f}")
+        print(f"  - Test C-index: {all_metrics['c_index'][0]:.7f} ± {all_metrics['c_index'][1]:.7f}")
 
     df = pd.concat(df_results_list, ignore_index=True)
     df.to_csv(args.output_csv, index=False)
