@@ -88,8 +88,8 @@ def initialize(args) -> argparse.Namespace:
         '-n',
         '--n_iterations',
         type=int,
-        default=1000,
-        help='The number of bootstrap iterations to perform for wPCC uncertainty calculation. The default is 10000.'
+        default=500,
+        help='The number of bootstrap iterations to perform for wPCC uncertainty calculation. The default is 500.'
     )
     parser.add_argument(
         '-nm',
@@ -219,7 +219,7 @@ def main():
     sys.stdout = utils.Logger(args.log)
     sys.stderr = utils.Logger(args.log)
 
-    # check if the pt files exist
+    # Check if the pt files exist
     assert os.path.isfile(args.train_dataset), f"Training dataset file {args.train_dataset} does not exist."
     assert os.path.isfile(args.test_dataset), f"Test dataset file {args.test_dataset} does not exist."
 
@@ -228,16 +228,19 @@ def main():
     print(f"Current working directory: {os.getcwd()}")
     print(f"Current time: {datetime.datetime.now()}")
     
+    # Get models
     model_paths = natsort.natsorted(glob.glob(os.path.join(args.model_dir, '*.model')))
     print(f"\nFound {len(model_paths)} model files in directory {args.model_dir}:")
     for i in range(len(model_paths)):
         print(f"  {os.path.basename(model_paths[i])}")
     
+    # Get scaler
     scaler_path = glob.glob(os.path.join(args.model_dir, '*.pickle'))
     assert len(scaler_path) == 1, f"Expected exactly one scaler file in {args.model_dir} shared by the models, found {len(scaler_path)}"
     scaler_path = scaler_path[0]
     print(f"\nFound the scaler file in directory {args.model_dir}: {os.path.basename(scaler_path)}\n")
 
+    # Set up arguments for running inference
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     train_data = nn_utils.GraphDataset(
@@ -258,6 +261,7 @@ def main():
         act_fn=args.act_fn
     )
 
+    # Iterate over models, make predictions and calculate metrics
     df_results_list = []
     for i in range(len(model_paths)):
         print(f"\n🔍 Assessing model {i+1}/{len(model_paths)}: {os.path.basename(model_paths[i])} ...")
@@ -291,6 +295,7 @@ def main():
         print(f"  - Test Spearman correlation: {all_metrics['spearman'][0]:.7f} ± {all_metrics['spearman'][1]:.7f}")
         print(f"  - Test C-index: {all_metrics['c_index'][0]:.7f} ± {all_metrics['c_index'][1]:.7f}")
 
+    # Assess ensemble model and calculate metrics
     if len(model_paths) > 1:
         df_ensemble = assess_ensemble(df_results_list)
         df_results_list.append(df_ensemble)
@@ -312,6 +317,7 @@ def main():
         print(f"  - Test Spearman correlation: {all_metrics['spearman'][0]:.7f} ± {all_metrics['spearman'][1]:.7f}")
         print(f"  - Test C-index: {all_metrics['c_index'][0]:.7f} ± {all_metrics['c_index'][1]:.7f}")
 
+    # Flatten the dataframe and save to .csv file
     df = pd.concat(df_results_list, ignore_index=True)
     df.to_csv(args.output_csv, index=False)
     print(f"\nPredictions saved to {args.output_csv}")
