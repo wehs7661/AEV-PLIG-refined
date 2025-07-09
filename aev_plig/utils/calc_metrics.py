@@ -55,7 +55,7 @@ class MetricCalculator:
             The minimum number of samples required in each group to calculate the metrics. If a group has fewer
             samples than this, it will be skipped. Default is 10. This parameter is ignored if groups are not provided.
         n_iterations : int, optional
-            The number of bootstrap iterations to perform. Default is 10000.
+            The number of bootstrap iterations to perform. Default is 500.
         """
         self.y_pred = np.array(y_pred)
         self.y_true = np.array(y_true)

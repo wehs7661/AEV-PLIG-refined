@@ -85,7 +85,7 @@ def initialize(args) -> argparse.Namespace:
         help='The activation function. The default is leaky_relu.'
     )
     parser.add_argument(
-        '-ni',
+        '-n',
         '--n_iterations',
         type=int,
         default=1000,
@@ -96,7 +96,8 @@ def initialize(args) -> argparse.Namespace:
         '--n_min',
         type=int,
         default=10,
-        help='The minimum number of samples required in a group to include group PCC (during each bootstrapping iteration). The default is 10.'
+        help='The minimum number of samples required in a group to calculate weighted averages of metrics \
+            across groups. The default is 10.'
     )
 
     args = parser.parse_args(args)
