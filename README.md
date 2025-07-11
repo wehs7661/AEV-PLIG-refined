@@ -32,29 +32,54 @@ The package provides several command-line interfaces (CLIs) to facilitate the st
 Here is the help message for the CLI `process_dataset`:
 ```
 usage: process_dataset [-h] -ds
-                       {pdbbind,hiqbind,bindingdb,bindingnet_v1,bindingnet_v2,neuralbind,fep_benchmarkcustom}
-                       -d DIR [-r REF] [-f FILTER] [-o OUTPUT] [-l LOG]
+                       {pdbbind,hiqbind,bindingdb,bindingnet_v1,bindingnet_v2,bindingnet_v1_v2,neuralbind,custom}
+                       -d DIR [DIR ...] [-cr CSV_REF] [-cf CSV_FILTER] [-s SPLIT SPLIT SPLIT]
+                       [-sc SIMILARITY_CUTOFF] [-rs RANDOM_SEED] [-f FILTERS [FILTERS ...]]
+                       [-o OUTPUT] [-l LOG]
 
 This CLI processes an input dataset and returns a CSV file for graph generation.
 
 options:
   -h, --help            show this help message and exit
-  -ds {pdbbind,hiqbind,bindingdb,bindingnet_v1,bindingnet_v2,neuralbind,fep_benchmarkcustom}, --dataset {pdbbind,hiqbind,bindingdb,bindingnet_v1,bindingnet_v2,neuralbind,fep_benchmarkcustom}
-                        The dataset to process. Options include pdbbind, bindingnet_v1,
-                        bindingnet_v2, bindingdb, neuralbind, fep_benchmark (FEP
-                        benchmark from Schrödinger), and custom (user-defined dataset).
-  -d DIR, --dir DIR     The root directory containing the dataset.
-  -r REF, --ref REF     The reference CSV file containing ligand paths (in the column
-                        'ligand_path') against which the maximum Tanimoto similarity is
-                        calculated for each ligand in the processed dataset.
-  -f FILTER, --filter FILTER
-                        The CSV file containing the system IDs (in the column
-                        'system_id') to be filtered out from the processed dataset.
+  -ds {pdbbind,hiqbind,bindingdb,bindingnet_v1,bindingnet_v2,bindingnet_v1_v2,neuralbind,custom},
+  --dataset {pdbbind,hiqbind,bindingdb,bindingnet_v1,bindingnet_v2,bindingnet_v1_v2,neuralbind,custom}
+                        The dataset to process. Options include pdbbind, hiqbind, bindingdb,
+                        bindingnet_v1, bindingnet_v2, neuralbind, and custom (user-defined dataset).
+  -d DIR [DIR ...], --dir DIR [DIR ...]
+                        The root directory containing the dataset. Note that if bindingnet_v1_v2 is
+                        selected as the dataset, (via the flag -ds/--dataset), two directories must
+                        be provided: the first one is for BindingNet v1 and the second one is for
+                        BindingNet v2.
+  -cr CSV_REF, --csv_ref CSV_REF
+                        The reference CSV file containing ligand paths (in the column 'ligand_path')
+                        against which the maximum Tanimoto similarity is calculated for each ligand
+                        in the processed dataset.
+  -cf CSV_FILTER, --csv_filter CSV_FILTER
+                        The CSV file containing the system IDs (in the column 'system_id') to be
+                        filtered out from the processed dataset.
+  -s SPLIT SPLIT SPLIT, --split SPLIT SPLIT SPLIT
+                        The split ratio for train, validation, and test sets. Default is [0.8, 0.1,
+                        0.1].
+  -sc SIMILARITY_CUTOFF, --similarity_cutoff SIMILARITY_CUTOFF
+                        The cutoff value for maximum Tanimoto similarity. Default is 1.0. A value of
+                        x means that only ligands with maximum Tanimoto similarity less than x will
+                        be considered for splitting. This option is only valid when the flag '-s'/'
+                        --split' is specified.
+  -rs RANDOM_SEED, --random_seed RANDOM_SEED
+                        The random seed for splitting the dataset. Default is None, in which case no
+                        random seed is used.
+  -f FILTERS [FILTERS ...], --filters FILTERS [FILTERS ...]
+                        The filters to apply to the dataset before splitting it. The filters are in
+                        the format of 'column_name operator value'. For example,
+                        'max_tanimoto_schrodinger < 0.9' will filter out entries with column
+                        'max_tanimoto_schrodinger' larger than 0.9. The operators include '<', '<=',
+                        '>', '>=', '==', and '!='.
   -o OUTPUT, --output OUTPUT
-                        The output CSV file. The default is processed_[dataset].csv where
-                        [dataset] is the dataset name.
+                        The output CSV file. The default is processed_[dataset].csv where [dataset]
+                        is the dataset name.
   -l LOG, --log LOG     The path to the log file. Default is process_dataset.log.
-  ```
+```
+
 
 ### CLI `generate_graphs`
 Here is the help message for the CLI `generate_graphs`:
@@ -65,42 +90,76 @@ This CLI generates graphs for the input dataset.
 
 options:
   -h, --help            show this help message and exit
-  -c CSV, --csv CSV     The path to the input processed CSV file. The CSV file should at
-                        least have columns including 'system_id', 'protein_path', and
-                        'ligand_path'.
+  -c CSV, --csv CSV     The path to the input processed CSV file. The CSV file should at least have
+                        columns including 'system_id', 'protein_path', and 'ligand_path'.
   -o OUTPUT, --output OUTPUT
-                        The path to the output pickle file for the generated graphs. Default is graphs.pickle.
+                        The path to the output pickle file for the generated graphs. Default is
+                        graphs.pickle.
   -l LOG, --log LOG     The path to the log file. Default is generate_graphs.log.
 ```
 
 ### CLI `create_pytorch_data`
 Here is the help message for the CLI `create_pytorch_data`:
 ```
-usage: create_pytorch_data [-h] -d DIR -c CSV_FILES [CSV_FILES ...]
-                           [-f FILTERS [FILTERS ...]] [-p PREFIX] [-o OUTPUT] [-l LOG]
+usage: create_pytorch_data [-h] -pg PICKLED_GRAPHS [PICKLED_GRAPHS ...] -c CSV_FILES [CSV_FILES ...]
+                           [-p PREFIX] [-o OUTPUT] [-l LOG]
 
 This CLI process pickled graphs and create PyTorch data ready for training.
 
 options:
   -h, --help            show this help message and exit
-  -d DIR, --dir DIR     The directory containing the pickled graphs.
+  -pg PICKLED_GRAPHS [PICKLED_GRAPHS ...], --pickled_graphs PICKLED_GRAPHS [PICKLED_GRAPHS ...]
+                        The paths to the pickled graphs. The pickled graphs should be in the format
+                        of .pkl or .pickle.
   -c CSV_FILES [CSV_FILES ...], --csv_files CSV_FILES [CSV_FILES ...]
-                        The paths to the input processed CSV files, each corresponding
-                        to a pickled graph. Each CSV file should at least have columns
-                        including 'system_id', 'protein_path', 'ligand_path', 'pK', and
-                        'split'.
-  -f FILTERS [FILTERS ...], --filters FILTERS [FILTERS ...]
-                        The filters to apply to the dataset. The filters are in the
-                        format of 'column_name operator value'. For example,
-                        'max_tanimoto_schrodinger < 0.9' will filter out entries with
-                        maximum Tanimoto similarity to Schrodinger dataset less than
-                        0.9. The operators include '<', '<=', '>', '>=', '==', and '!='.
+                        The paths to the input processed CSV files, each corresponding to a pickled
+                        graph. The order of the CSV files should match the order of the pickled
+                        graphs. The CSV files should contain the columns 'system_id',
+                        'protein_path', 'ligand_path', 'pK', and 'split'. The 'system_id' column
+                        should contain the same IDs as the pickled graphs.
   -p PREFIX, --prefix PREFIX
                         The prefix of the output PyTorch files. Default is 'dataset'.
   -o OUTPUT, --output OUTPUT
-                        The output directory. Default is the same as the input
-                        directory.
+                        The output directory. Default is the same as the input directory.
   -l LOG, --log LOG     The path to the log file. Default is create_pytorch_data.log.
+```
+
+### CLI `assess_trained_models`
+Here is the help message for the CLI `assess_trained_models`:
+```
+usage: assess_trained_models [-h] [-md MODEL_DIR] [-tr TRAIN_DATASET] [-t TEST_DATASET]
+                             [-o OUTPUT_CSV] [-l LOG] [-hd HIDDEN_DIM] [-nh N_HEADS] [-a ACT_FN]
+                             [-n N_ITERATIONS] [-nm N_MIN]
+
+Assess trained AEV-PLIG models on benchmark test datasets
+
+options:
+  -h, --help            show this help message and exit
+  -md MODEL_DIR, --model_dir MODEL_DIR
+                        Directory containing trained model files and the pickled scaler file shared
+                        by the models. The default is 'outputs'.
+  -tr TRAIN_DATASET, --train_dataset TRAIN_DATASET
+                        The path to the PyTorch file of the training set for scaling the test data.
+                        The default is 'data/processed/dataset_train.pt'.
+  -t TEST_DATASET, --test_dataset TEST_DATASET
+                        The path to the PyTorch file of the test set. The default is
+                        'data/processed/dataset_test.pt'.
+  -o OUTPUT_CSV, --output_csv OUTPUT_CSV
+                        The path to the output CSV file where the assessment results will be saved.
+                        The default is assess_trained_models.csv.
+  -l LOG, --log LOG     The path to the log file. The default is assessed_trained_models.log.
+  -hd HIDDEN_DIM, --hidden_dim HIDDEN_DIM
+                        The hidden dimension size. The default is 256.
+  -nh N_HEADS, --n_heads N_HEADS
+                        The number of attention heads. The default is 3.
+  -a ACT_FN, --act_fn ACT_FN
+                        The activation function. The default is leaky_relu.
+  -n N_ITERATIONS, --n_iterations N_ITERATIONS
+                        The number of bootstrap iterations to perform for wPCC uncertainty
+                        calculation. The default is 500.
+  -nm N_MIN, --n_min N_MIN
+                        The minimum number of samples required in a group to calculate weighted
+                        averages of metrics across groups. The default is 10.
 ```
 
 ## Usage
