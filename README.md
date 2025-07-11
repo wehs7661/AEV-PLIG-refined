@@ -8,9 +8,21 @@ This repo provides an implementation of the AEV-PLIG model modified from the ori
 We recommend using a conda environment to install the package.
 ```
 conda create --name aev-plig
+conda activate aev-plig
+pip install --upgrade pip setuptools
+
 git clone https://github.com/wehs7661/AEV-PLIG-refined.git
 cd AEV-PLIG-refined
-pip install .
+
+pip install torch==2.5.0
+python3.10 -c "import torch; print(torch.__version__)"
+pip3.10 install torch-scatter --no-cache-dir -f https://data.pyg.org/whl/torch-<TORCH_VERSION>+<CUDA_VERSION>.html
+# for example: pip3.10 install torch-scatter --no-cache-dir -f https://data.pyg.org/whl/torch-2.5.0+cu124.html
+
+pip3.10 install -e .
+
+echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
+source ~/.bashrc
 ```
 
 ## Command-line interfaces (CLIs)

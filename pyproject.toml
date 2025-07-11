@@ -36,6 +36,7 @@ dependencies = [
     "tqdm",
     "natsort",
     "scipy",
+    "numba"
 ]
 
 # Entry point for CLI commands
