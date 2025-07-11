@@ -93,41 +93,6 @@ class MetricCalculator:
         weighted_mean = np.sum(values * weights) / np.sum(weights)
         return weighted_mean
 
-    # OLD BOOTSTRAP METHOD - samples PCC values instead of complexes, preserved for posterity
-    # @staticmethod
-    # def calc_bootstrap_uncertainty(values, weights, n_iterations=10000):
-    #     """
-    #     Calculate the uncertainty of a weighted mean using bootstrapping by sampling PCC values.
-        
-    #     Parameters
-    #     ----------
-    #     values : np.ndarray
-    #         The values to calculate the uncertainty for.
-    #     weights : np.ndarray
-    #         The weights corresponding to each value.
-    #     n_iterations : int, optional
-    #         The number of bootstrap iterations to perform. Default is 10000.
-        
-    #     Returns
-    #     -------
-    #     ci_bounds : list
-    #         A list containing the lower and upper bounds of the 95% confidence interval for the weighted mean.
-    #     """
-    #     n = len(values)
-    #     bootstrap_means = np.zeros(n_iterations)
-        
-    #     for i in range(n_iterations):
-    #         indices = np.random.choice(np.arange(n), size=n, replace=True)
-    #         bootstrap_values = values[indices]
-    #         bootstrap_weights = weights[indices]
-    #         bootstrap_means[i] = MetricCalculator.calc_weighted_mean(bootstrap_values, bootstrap_weights)
-        
-    #     lower_bound = np.percentile(bootstrap_means, 2.5)
-    #     upper_bound = np.percentile(bootstrap_means, 97.5)
-    #     ci_bounds = (lower_bound, upper_bound)
-        
-    #     return ci_bounds
-
     @staticmethod
     def calc_bootstrap_uncertainty_unweighted(y_pred, y_true, n_iterations=500):
         """
@@ -198,7 +163,9 @@ class MetricCalculator:
     @staticmethod
     def calc_bootstrap_uncertainty(y_pred, y_true, groups, n_iterations=500, n_min=10):
         """
-        Calculate the uncertainty of weighted metrics using bootstrapping by sampling complexes.
+        Calculate the uncertainty of weighted metrics using bootstrapping:
+        sampling n_i complexes with replacement from each group i size n_i >= n_min
+        (as opposed to sampling X complexes from dataset size X, or sampling group metrics themselves)
         
         Parameters
         ----------
@@ -209,7 +176,7 @@ class MetricCalculator:
         groups : np.ndarray
             The group labels corresponding to each prediction/true value pair.
         n_iterations : int, optional
-            The number of bootstrap iterations to perform. Default is 10000.
+            The number of bootstrap iterations to perform. Default is 500.
         n_min : int, optional
             The minimum number of samples required in each group to calculate the metrics. Default is 10.
         
@@ -218,7 +185,23 @@ class MetricCalculator:
         bootstrap_results : dict
             Dictionary with bootstrap statistics for all metrics containing mean, std, and 95% confidence intervals.
         """
-        n_complexes = len(y_pred)
+        # Filter out groups with less than n_min samples
+        unique_groups, group_counts = np.unique(groups, return_counts=True)
+        valid_groups = unique_groups[group_counts >= n_min]
+        
+        if len(valid_groups) == 0:
+            print("No groups meet the minimum size requirement.")
+            return {metric: {'mean': np.nan, 'std': np.nan, 'ci_lower': np.nan, 'ci_upper': np.nan} 
+                    for metric in ['pearson', 'spearman', 'kendall', 'mse', 'rmse', 'c_index']}
+        
+        # Pre-compute group indices for efficiency
+        group_indices = {}
+        group_sizes = {}
+        for group in valid_groups:
+            mask = groups == group
+            group_indices[group] = np.where(mask)[0]
+            group_sizes[group] = len(group_indices[group])
+        
         bootstrap_metrics = {
             'pearson': np.zeros(n_iterations),
             'spearman': np.zeros(n_iterations),
@@ -229,12 +212,6 @@ class MetricCalculator:
         }
         
         for i in range(n_iterations):
-            # Sample complexes with replacement
-            bootstrap_indices = np.random.choice(n_complexes, size=n_complexes, replace=True)
-            bootstrap_y_pred = y_pred[bootstrap_indices]
-            bootstrap_y_true = y_true[bootstrap_indices]
-            bootstrap_groups = groups[bootstrap_indices]
-            
             # Initialize metrics and weights for current iteration
             family_metrics = {
                 'pearson': [], 'spearman': [], 'kendall': [], 
@@ -242,33 +219,32 @@ class MetricCalculator:
             }
             family_weights = []
             
-            # Calculate metrics for each group in this bootstrap sample
-            for group in np.unique(bootstrap_groups):
-                group_mask = bootstrap_groups == group
-                group_y_pred = bootstrap_y_pred[group_mask]
-                group_y_true = bootstrap_y_true[group_mask]
+            # For each valid group, sample n_i complexes with replacement from that group
+            for group in valid_groups:
+                n_i = group_sizes[group]
+                original_indices = group_indices[group]
                 
-                if len(group_y_pred) >= n_min:
-                    # Calculate all metrics for this group
-                    mse_val = np.mean((group_y_pred - group_y_true) ** 2)
-                    family_metrics['pearson'].append(stats.pearsonr(group_y_pred, group_y_true)[0])
-                    family_metrics['spearman'].append(stats.spearmanr(group_y_pred, group_y_true)[0])
-                    family_metrics['kendall'].append(stats.kendalltau(group_y_pred, group_y_true)[0])
-                    family_metrics['mse'].append(mse_val)
-                    family_metrics['rmse'].append(np.sqrt(mse_val))
-                    family_metrics['c_index'].append(calc_c_index(group_y_pred, group_y_true))
-                    family_weights.append(len(group_y_pred))
+                # Sample n_i complexes with replacement from this group
+                bootstrap_indices = np.random.choice(original_indices, size=n_i, replace=True)
+                group_y_pred = y_pred[bootstrap_indices]
+                group_y_true = y_true[bootstrap_indices]
+                
+                # Calculate all metrics for this group
+                mse_val = np.mean((group_y_pred - group_y_true) ** 2)
+                family_metrics['pearson'].append(stats.pearsonr(group_y_pred, group_y_true)[0])
+                family_metrics['spearman'].append(stats.spearmanr(group_y_pred, group_y_true)[0])
+                family_metrics['kendall'].append(stats.kendalltau(group_y_pred, group_y_true)[0])
+                family_metrics['mse'].append(mse_val)
+                family_metrics['rmse'].append(np.sqrt(mse_val))
+                family_metrics['c_index'].append(calc_c_index(group_y_pred, group_y_true))
+                family_weights.append(n_i)
             
             # Calculate weighted metrics for this bootstrap iteration
-            if family_weights:
-                family_weights = np.array(family_weights)
-                for metric_name in bootstrap_metrics.keys():
-                    metric_values = np.array(family_metrics[metric_name])
-                    weighted_metric = np.sum(metric_values * family_weights) / np.sum(family_weights)
-                    bootstrap_metrics[metric_name][i] = weighted_metric
-            else:
-                for metric_name in bootstrap_metrics.keys():
-                    bootstrap_metrics[metric_name][i] = np.nan
+            family_weights = np.array(family_weights)
+            for metric_name in bootstrap_metrics.keys():
+                metric_values = np.array(family_metrics[metric_name])
+                weighted_metric = np.sum(metric_values * family_weights) / np.sum(family_weights)
+                bootstrap_metrics[metric_name][i] = weighted_metric
         
         # Calculate statistics for each metric
         results = {}
@@ -350,11 +326,6 @@ class MetricCalculator:
 
             # Calculate weighted average correlation
             metric = self.calc_weighted_mean(np.array(metric_values), np.array(group_sizes))
-
-            # # OLD BOOTSTRAP METHOD - preserved for posterity
-            # # Calculate uncertainty using bootstrapping
-            # ci_bounds = self.calc_bootstrap_uncertainty(np.array(metric_values), np.array(group_sizes))
-            # uncertainty = (ci_bounds[1] - ci_bounds[0]) / 2
 
         else:
             metric = metric_func(self.y_pred, self.y_true)[0]
