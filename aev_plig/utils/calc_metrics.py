@@ -37,7 +37,7 @@ class MetricCalculator:
     A class to calculate various metrics between predicted and true values, including
     Pearson correlation, Spearman correlation, Kendall correlation, C-index, RMSE, and MSE.    
     """
-    def __init__(self, y_pred, y_true, groups=None, n_min=10, n_iterations=500):
+    def __init__(self, y_pred, y_true, groups=None, n_min=10, n_iterations=500, seed=None):
         """
         Initializes the MetricCalculator class.
 
@@ -56,7 +56,11 @@ class MetricCalculator:
             samples than this, it will be skipped. Default is 10. This parameter is ignored if groups are not provided.
         n_iterations : int, optional
             The number of bootstrap iterations to perform. Default is 500.
+        seed : int, optional
+            The random seed for reproducibility of uncertainty estimation with bootstrapping. If None, no seed is set.
         """
+        if seed is not None:
+            np.random.seed(seed)
         self.y_pred = np.array(y_pred)
         self.y_true = np.array(y_true)
         self.groups = np.array(groups) if groups is not None else None
@@ -123,7 +127,7 @@ class MetricCalculator:
             'c_index': np.zeros(n_iterations)
         }
         
-        for i in range(n_iterations):
+        for i in tqdm(range(n_iterations), total=n_iterations, desc="    Bootstrapping metrics", file=sys.__stderr__):
             # Sample data points with replacement
             bootstrap_indices = np.random.choice(n_samples, size=n_samples, replace=True)
             bootstrap_y_pred = y_pred[bootstrap_indices]
@@ -211,7 +215,7 @@ class MetricCalculator:
             'c_index': np.zeros(n_iterations)
         }
         
-        for i in range(n_iterations):
+        for i in tqdm(range(n_iterations), total=n_iterations, desc="Bootstrapping metrics", file=sys.__stderr__):
             # Initialize metrics and weights for current iteration
             family_metrics = {
                 'pearson': [], 'spearman': [], 'kendall': [], 

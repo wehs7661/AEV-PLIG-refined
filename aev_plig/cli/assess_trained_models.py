@@ -99,6 +99,13 @@ def initialize(args) -> argparse.Namespace:
         help='The minimum number of samples required in a group to calculate weighted averages of metrics \
             across groups. The default is 10.'
     )
+    parser.add_argument(
+        '-s',
+        '--seed',
+        type=int,
+        help='The random seed for the reproducibiility of uncertainty estimation with bootstrapping. \
+            The default is None, which means no seed is set.'
+    )
 
     args = parser.parse_args(args)
     return args
@@ -284,7 +291,8 @@ def main():
             df_results['y_pred'].tolist(),
             None if df_results['group_id'].isnull().all() else df_results['group_id'].tolist(),
             n_min = args.n_min,
-            n_iterations = args.n_iterations
+            n_iterations = args.n_iterations,
+            seed = args.seed
         )
         all_metrics = metrics.all_metrics()
         
@@ -299,13 +307,14 @@ def main():
     if len(model_paths) > 1:
         df_ensemble = assess_ensemble(df_results_list)
         df_results_list.append(df_ensemble)
-        print(f"   Calculating metrics and performing bootstrapping with {args.n_iterations} iterations for ensemble model")
+        print(f"\n🔍 Calculating metrics and performing bootstrapping with {args.n_iterations} iterations for ensemble model ...")
         metrics = calc_metrics.MetricCalculator(
             df_ensemble['y_true'].tolist(),
             df_ensemble['y_pred'].tolist(),
             None if df_ensemble['group_id'].isnull().all() else df_ensemble['group_id'].tolist(),
-            n_min = args.n_min,
-            n_iterations = args.n_iterations
+            n_min=args.n_min,
+            n_iterations=args.n_iterations,
+            seed=args.seed
         )
         all_metrics = metrics.all_metrics()
         
