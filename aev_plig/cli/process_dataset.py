@@ -140,7 +140,7 @@ def main():
         filter_df = pd.read_csv(args.csv_filter)
         filter_ids = filter_df["system_id"].tolist()
         to_drop = df[df["system_id"].isin(filter_ids)].copy()
-        to_drop['reason'] = f'Overalp with {os.path.basename(args.csv_filter)}'
+        to_drop['reason'] = f'Overlap with {os.path.basename(args.csv_filter)}'
         dropped_df = pd.concat([dropped_df, to_drop])
         df = df[~df["system_id"].isin(filter_ids)]
         print(f"Dropped {len(to_drop)} entries from that were also present in dataset {os.path.basename(args.csv_filter)}.")

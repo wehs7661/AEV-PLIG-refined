@@ -36,6 +36,7 @@ dependencies = [
     "tqdm",
     "natsort",
     "scipy",
+    "numba"
 ]
 
 # Entry point for CLI commands
@@ -44,6 +45,7 @@ process_dataset = "aev_plig.cli.process_dataset:main"
 generate_graphs = "aev_plig.cli.generate_graphs:main"
 create_pytorch_data = "aev_plig.cli.create_pytorch_data:main"
 train_aev_plig = "aev_plig.cli.train_aev_plig:main"
+assess_trained_models = "aev_plig.cli.assess_trained_models:main"
 
 # Update the urls once the hosting is set up.
 #[project.urls]

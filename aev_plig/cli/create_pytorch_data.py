@@ -34,16 +34,6 @@ def initialize(args):
             'ligand_path', 'pK', and 'split'. The 'system_id' column should contain the same IDs as the pickled graphs."
     )
     parser.add_argument(
-        "-f",
-        "--filters",
-        nargs='+',
-        type=str,
-        help="The filters to apply to the dataset before splitting it. The filters are in the format of \
-            'column_name operator value'. For example, 'max_tanimoto_schrodinger < 0.9' will filter out entries \
-            with column 'max_tanimoto_schrodinger' larger than 0.9. The operators include '<', '<=', '>', \
-            '>=', '==', and '!='."
-    )
-    parser.add_argument(
         "-p",
         "--prefix",
         type=str,
@@ -54,6 +44,7 @@ def initialize(args):
         "-o",
         "--output",
         type=str,
+        default="data",
         help="The output directory. Default is the same as the input directory."
     )
     parser.add_argument(
@@ -71,6 +62,10 @@ def initialize(args):
 def main():
     t0 = time.time()
     args = initialize(sys.argv[1:])
+
+    # Ensure output directory exists
+    os.makedirs(args.output, exist_ok=True)
+
     sys.stdout = utils.Logger(args.log)
     sys.stderr = utils.Logger(args.log)
 
@@ -92,10 +87,6 @@ def main():
     for csv_file in args.csv_files:
         print(f"Processing {csv_file}...")
         csv_data = pd.read_csv(csv_file)
-        if args.filters:
-            for filter_str in args.filters:
-                column, operator, value = utils.parse_filter(filter_str)
-                csv_data = utils.apply_filter(csv_data, column, operator, value)
         
         if 'group_id' not in csv_data.columns:
             csv_data['group_id'] = None
@@ -122,6 +113,6 @@ def main():
         df_split = data[data['split'] == split]
         split_ids, split_y = list(df_split['system_id']), list(df_split['pK'])
         group_ids = list(df_split['group_id'])
-        split_data = nn_utils.GraphDataset(root='data', dataset=f'{args.prefix}_{split}', ids=split_ids, y=split_y, graphs_dict=graphs_dict, group_ids=group_ids)
+        split_data = nn_utils.GraphDataset(root=args.output, dataset=f'{args.prefix}_{split}', ids=split_ids, y=split_y, graphs_dict=graphs_dict, group_ids=group_ids)
 
     print(f"Elapsed time: {utils.format_time(time.time() - t0)}")
