@@ -38,7 +38,7 @@ def initialize(args):
         "--dir",
         type=str,
         required=True,
-        nargs ="+",
+        nargs="+",
         help="The root directory containing the dataset. Note that if bindingnet_v1_v2 is selected as the dataset, \
             (via the flag -ds/--dataset), two directories must be provided: the first one is for BindingNet v1\
             and the second one is for BindingNet v2."
