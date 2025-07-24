@@ -1,5 +1,5 @@
 # AEV-PLIG refined
-This is a repository that hosts a refined implementation for the AEV-PLIG model, a GNN-based scoring function that predicts the binding affinity of a bound protein-ligand complex given its 3D structure. Compared to the original repo ([here](https://github.com/isakvals/AEV-PLIG)), this repo provides user-friendly command-line interfaces (CLIs), a more organised codebase, and implements the method as a pip-installable package. For more details about the notable changes, please refer to [CHANGELOG.md](CHANGELOG.md).
+This is a repository that hosts a refined implementation for the AEV-PLIG model, a GNN-based scoring function that predicts the binding affinity of a bound protein-ligand complex given its 3D structure. Compared to the original repo ([here](https://github.com/isakvals/AEV-PLIG)), this repo provides user-friendly command-line interfaces (CLIs), a more organised codebase, and implements the method as a pip-installable package.
 
 ## Installation
 We recommend using a conda environment to install the package.
@@ -78,7 +78,7 @@ The command will output a CSV file `assess_trained_models.csv` that contains col
 ### Step 6: Putting everything together in a shell script
 To automate the above steps, we can create a shell script that runs all the necessary commands in sequence.
 
-````bash
+```bash
 # Step 1. Prepare the dataset index files
 python prepare_dataset.py  # A custom script you write to prepare your custom dataset index file
 process_dataset -ds hiqbind -d path_to_hiqbind_directory -cr path_to_ref_csv_file -l process_hiqbind.log -sc 0.9 -s 95 5 0 -rs 0
