@@ -1,10 +1,48 @@
 import os
-import numpy as np
+import sys
 import pandas as pd
+from tqdm import tqdm
 from rdkit import Chem
-from rdkit.DataStructs import BulkTanimotoSimilarity
-from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
 from multiprocessing import Pool, cpu_count
+from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
+
+
+def get_atom_types_from_sdf(sdf_file):
+    """
+    Get the atom types from an SDF file.
+
+    Parameters
+    ----------
+    sdf_file : str
+        Path to the SDF file.
+    
+    Returns
+    -------
+    atom_types : list
+        List of atom types.
+    """
+    suppl = Chem.SDMolSupplier(sdf_file)
+    atom_types = []
+    for mol in suppl:
+        if mol is not None:
+            for atom in mol.GetAtoms():
+                atom_types.append(atom.GetSymbol())
+    
+    atom_types = list(set(atom_types))
+    return atom_types
+
+
+def get_atom_types_from_sdf_parallelized(paths):
+    with Pool(initializer=lambda:os.sched_setaffinity(0, set(range(cpu_count())))) as pool:
+        results = list(
+            tqdm(
+                pool.imap(get_atom_types_from_sdf, paths),
+                total=len(paths),
+                desc="Getting atom types from SDF",
+                file=sys.__stderr__,
+            )
+        )
+    return results
 
 
 def generate_fingerprint(sdf_file):
@@ -51,7 +89,10 @@ def generate_fingerprints_parallelized(df, col_name):
     """
     sdf_paths = df[col_name].tolist()
     with Pool(initializer=lambda: os.sched_setaffinity(0, set(range(cpu_count())))) as pool:
-        results = list(pool.imap(generate_fingerprint, sdf_paths))
+        results = list(tqdm(pool.imap(generate_fingerprint, sdf_paths),
+                            total=len(sdf_paths),
+                            file=sys.__stderr__,
+                            desc="Generating fingerprints"))
     fingerprints, valid_indices = [], []
     for index, fingerprint in enumerate(results):
         if fingerprint is not None:
@@ -59,29 +100,3 @@ def generate_fingerprints_parallelized(df, col_name):
             valid_indices.append(index)
     
     return fingerprints, valid_indices
-
-def calc_max_tanimoto_similarity(fps1, fps2):
-    """
-    Given two sets of fingerprints, calculate the maximum Tanimoto similarity
-    between each fingerprint in the first set and all fingerprints in the second set.
-    
-    Parameters
-    ----------
-    fps1 : list
-        The first set of fingerprints.
-    fps2 : list
-        The second set of fingerprints.
-    
-    Returns
-    -------
-    max_similarities : list
-        A list of maximum Tanimoto similarities against the second set of fingerprints for each
-        fingerprint in the first set.
-    """
-    max_similarities = []
-    for i in range(len(fps1)):
-        max_similarities.append(BulkTanimotoSimilarity(fps1[i], fps2))
-    max_similarities = np.array(max_similarities)
-    max_similarities = max_similarities.max(axis=1)
-
-    return max_similarities

@@ -15,14 +15,14 @@ class GATv2Net(torch.nn.Module):
         super(GATv2Net, self).__init__()
         
         self.number_GNN_layers = 5
-        self.act = config.activation_function
+        self.act = config.act_fn
         self.activation = activation_function_dict[self.act]
         
         self.GNN_layers = nn.ModuleList()
         self.BN_layers = nn.ModuleList()
         
         input_dim = node_feature_dim
-        head = config.head
+        head = config.n_heads
         hidden_dim = config.hidden_dim
         
         self.GNN_layers.append(GATv2Conv(input_dim, hidden_dim, heads=head, edge_dim=edge_feature_dim))
@@ -41,8 +41,6 @@ class GATv2Net(torch.nn.Module):
         self.fc3 = nn.Linear(512, 256)
         self.bn_connect3 = nn.BatchNorm1d(256)
         self.out = nn.Linear(256, 1)
-
-
 
     def forward(self, data):
         x, edge_index, edge_attr, batch = data.x, data.edge_index, data.edge_attr, data.batch
@@ -66,5 +64,3 @@ class GATv2Net(torch.nn.Module):
         x = self.bn_connect3(x)
         return self.out(x)
 
-
-    

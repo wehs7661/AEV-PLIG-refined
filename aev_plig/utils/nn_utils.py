@@ -1,11 +1,42 @@
 import os
-import sys
-import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
+import torch 
 import numpy as np
-from torch_geometric.data import InMemoryDataset, Data
-import torch
 from sklearn.preprocessing import StandardScaler
+from torch_geometric.data import InMemoryDataset, Data
+
+def get_device():
+    """
+    Get the device to be used for training and inference.
+
+    Returns
+    -------
+    device : torch.device
+        The device to be used (CPU or GPU).
+    """
+    if(torch.cuda.is_available()):
+        print("GPU is available")
+        device = torch.device("cuda")
+    else:
+        print("GPU is NOT available")
+        device = torch.device("cpu")
+    
+    return device
+
+def set_seed(seed):
+    """
+    Set the random seed for reproducibility.
+
+    Parameters
+    ----------
+    seed : int
+        The seed value to be set for random number generation.
+    """
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 def init_weights(layer):
     if hasattr(layer, "weight") and "BatchNorm" not in str(layer):
@@ -16,7 +47,7 @@ def init_weights(layer):
 
 class GraphDataset(InMemoryDataset):
     def __init__(self, root='data', dataset=None,
-                 ids=None, y=None, graphs_dict=None, y_scaler=None):
+                 ids=None, y=None, graphs_dict=None, y_scaler=None, group_ids=None):
 
         super(GraphDataset, self).__init__(root)
         self.dataset = dataset
@@ -25,11 +56,10 @@ class GraphDataset(InMemoryDataset):
         if os.path.isfile(self.processed_paths[0]):
             #self.data, self.slices = torch.load(self.processed_paths[0])
             self.load(self.processed_paths[0])
-            print("processed paths:")
-            print(self.processed_paths[0])
+            print(f'Preparing {self.processed_paths[0]} ...')
 
         else:
-            self.process(ids, y, graphs_dict)
+            self.process(ids, y, graphs_dict, group_ids)
             #self.data, self.slices = torch.load(self.processed_paths[0])
             self.load(self.processed_paths[0])
         
@@ -58,31 +88,38 @@ class GraphDataset(InMemoryDataset):
         if not os.path.exists(self.processed_dir):
             os.makedirs(self.processed_dir)
 
-    def process(self, ids, y, graphs_dict):
+    def process(self, ids, y, graphs_dict, group_ids):
         assert (len(ids) == len(y)), 'Number of datapoints and labels must be the same'
+        assert (len(group_ids) == len(y)), 'Number of group_ids and labels must be the same'
         data_list = []
         data_len = len(ids)
         for i in range(data_len):
             pdbcode = ids[i]
             label = y[i]
+            group_id = group_ids[i] if group_ids[i] is not None else None
+            group_id = np.array([group_id])  # Otherwise, if group_id is None, data_point won't have group_id attribute
             c_size, features, edge_index, edge_features = graphs_dict[pdbcode]
-            data_point = Data(x=torch.Tensor(np.array(features)),
-                                   edge_index=torch.LongTensor(np.array(edge_index)).T,
-                                   edge_attr=torch.Tensor(np.array(edge_features)),
-                                   y=torch.FloatTensor(np.array([label])))
-            
+            data_point = Data(
+                x=torch.Tensor(np.array(features)),
+                edge_index=torch.LongTensor(np.array(edge_index)).T,
+                edge_attr=torch.Tensor(np.array(edge_features)),
+                y=torch.FloatTensor(np.array([label])),
+                group_id=group_id
+            )
+            data_point.group_id = group_id
+
             data_list.append(data_point)
 
-        print('Graph construction done. Saving to file.')
-        #self.data, self.slices = self.collate(data_list)
+        # print('Graph construction done. Saving to file.')
+        # self._data, self.slices = self.collate(data_list)
+        print(f'Saving processed data to {self.processed_paths[0]} ...')
         self.save(data_list, self.processed_paths[0])
         #torch.save((self.data, self.slices), self.processed_paths[0])
         
 
-
 class GraphDatasetPredict(InMemoryDataset):
     def __init__(self, root='data', dataset=None,
-                 ids=None, graph_ids=None, graphs_dict=None):
+                 ids=None, graph_ids=None, graphs_dict=None, group_ids=None):
 
         super(GraphDatasetPredict, self).__init__(root)
         self.dataset = dataset
@@ -93,7 +130,7 @@ class GraphDatasetPredict(InMemoryDataset):
             print(self.processed_paths[0])
 
         else:
-            self.process(ids, graph_ids, graphs_dict)
+            self.process(ids, graph_ids, graphs_dict, group_ids)
             self.load(self.processed_paths[0])
         
     @property
@@ -114,64 +151,24 @@ class GraphDatasetPredict(InMemoryDataset):
         if not os.path.exists(self.processed_dir):
             os.makedirs(self.processed_dir)
 
-    def process(self, ids, graph_ids, graphs_dict):
+    def process(self, ids, graph_ids, graphs_dict, group_ids):
         assert (len(ids) == len(graph_ids)), 'Number of datapoints and labels must be the same'
         data_list = []
         data_len = len(ids)
         for i in range(data_len):
             pdbcode = ids[i]
             graph_id = graph_ids[i]
+            group_id = group_ids[i] if group_ids is not None else None
             c_size, features, edge_index, edge_features = graphs_dict[pdbcode]
-            data_point = Data(x=torch.Tensor(np.array(features)),
-                                   edge_index=torch.LongTensor(np.array(edge_index)).T,
-                                   edge_attr=torch.Tensor(np.array(edge_features)),
-                                   y=torch.IntTensor(np.array([graph_id])))
+            data_point = Data(
+                x=torch.Tensor(np.array(features)),
+                edge_index=torch.LongTensor(np.array(edge_index)).T,
+                edge_attr=torch.Tensor(np.array(edge_features)),
+                y=torch.IntTensor(np.array([graph_id])),
+                group_id=group_id
+            )
             
             data_list.append(data_point)
 
         print('Graph construction done. Saving to file.')
         self.save(data_list, self.processed_paths[0])
-
-class Logger:
-    """
-    A logger class that redirects the STDOUT and STDERR to a specified output file while
-    preserving the output on screen. This is useful for logging terminal output to a file
-    for later analysis while still seeing the output in real-time during execution.
-
-    Parameters
-    ----------
-    logfile : str
-        The file path of which the standard output and standard error should be logged.
-
-    Attributes
-    ----------
-    terminal : :code:`io.TextIOWrapper` object
-        The original standard output object, typically :code:`sys.stdout`.
-    log : :code:`io.TextIOWrapper` object
-        File object used to log the output in append mode.
-    """
-
-    def __init__(self, logfile):
-        self.terminal = sys.stdout
-        self.log = open(logfile, "a")
-
-    def write(self, message):
-        """
-        Writes a message to the terminal and to the log file.
-
-        Parameters
-        ----------
-        message : str
-            The message to be written to STDOUT and the log file.
-        """
-        self.terminal.write(message)
-        self.log.write(message)
-        self.log.flush()  # Ensure the message is written immediately
-
-    def flush(self):
-        """
-        This method is needed for Python 3 compatibility. This handles the flush command by doing nothing.
-        Some extra behaviors may be specified here.
-        """
-        # self.terminal.log()
-        pass

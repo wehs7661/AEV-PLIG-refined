@@ -7,14 +7,16 @@ import argparse
 import torchani
 import datetime
 import aev_plig
+import traceback
 import torchani_mod
 import numpy as np
 import pandas as pd
 import qcelemental as qcel
 from tqdm import tqdm
 from rdkit import Chem
+from aev_plig.utils import utils
 from aev_plig.data import data_dir
-from aev_plig.utils import Logger
+from multiprocessing import Pool, cpu_count
 
 
 def initialize(args):
@@ -95,29 +97,75 @@ def LoadMolasDF(mol):
 
 
 def LoadPDBasDF(PDB, atom_keys):
-# This function converts a protein PDB file into a pandas DataFrame with the protein atom position in 3D (X,Y,Z)
+    """
+    Converts a protein PDB file into a pandas DataFrame having columns including
+    ATOM_INDEX, ATOM_TYPE, X, Y, and Z. Note that this function filters out hydrogen atoms
+    and do not consider HETATM records.
 
+    Parameters
+    ----------
+    PDB: str
+        Path to the PDB file.
+    atom_keys: pd.DataFrame
+        DataFrame containing atom types and their corresponding keys.
+
+    Returns
+    -------
+    df : pd.DataFrame
+        DataFrame with columns ATOM_INDEX, ATOM_TYPE, X, Y, and Z.
+    """
     prot_atoms = []
-    
-    f = open(PDB)
-    for i in f:
-        if i[:4] == "ATOM":
-            # Include only non-hydrogen atoms
-            if (len(i[12:16].replace(" ","")) < 4 and i[12:16].replace(" ","")[0] != "H") or (len(i[12:16].replace(" ","")) == 4 and i[12:16].replace(" ","")[1] != "H" and i[12:16].replace(" ","")[0] != "H"):
-                prot_atoms.append([int(i[6:11]),
-                         i[17:20]+"-"+i[12:16].replace(" ",""),
-                         float(i[30:38]),
-                         float(i[38:46]),
-                         float(i[46:54])
-                        ])
-                
-    f.close()
-    
-    df = pd.DataFrame(prot_atoms, columns=["ATOM_INDEX","PDB_ATOM","X","Y","Z"])
-    df = df.merge(atom_keys, left_on='PDB_ATOM', right_on='PDB_ATOM')[["ATOM_INDEX", "ATOM_TYPE", "X", "Y", "Z"]].sort_values(by="ATOM_INDEX").reset_index(drop=True)
+    auto_serial = 100000  # Upon this number, we assume contiguous indexing
+    max_seen_index = 0  # track max index for all atoms (including hydrogen)
+
+    with open(PDB) as f:
+        for i, line in enumerate(f):
+            if not line.startswith("ATOM"):
+                continue
+
+            atom_name = line[12:16].strip()
+            resname = line[17:20].strip()
+            index_str = line[6:11].strip()
+
+            if index_str.isdigit():
+                atom_index = int(index_str)
+                if atom_index > max_seen_index:
+                    max_seen_index = atom_index
+            else:
+                # print(max_atom_index, line)
+                assert max_seen_index >= 99999, f"There exist atom indices with non-numeric values \
+                    before the number of atoms exceeds 99999. (position: {i})"
+                atom_index = auto_serial
+                auto_serial += 1
+
+            # Skip hydrogens when adding to prot_atoms
+            is_hydrogen = (
+                (len(atom_name) < 4 and atom_name[0] == "H") or
+                (len(atom_name) == 4 and (atom_name[0] == "H" or atom_name[1] == "H"))
+            )
+            if is_hydrogen:
+                continue
+
+            x = float(line[30:38])
+            y = float(line[38:46])
+            z = float(line[46:54])
+            pdb_atom = f"{resname}-{atom_name}"            
+            prot_atoms.append([atom_index, pdb_atom, x, y, z])
+
+    df = pd.DataFrame(prot_atoms, columns=["ATOM_INDEX", "PDB_ATOM", "X", "Y", "Z"])
+    df = (
+        df
+        .merge(atom_keys, left_on='PDB_ATOM', right_on='PDB_ATOM')
+        [["ATOM_INDEX", "ATOM_TYPE", "X", "Y", "Z"]]
+        .sort_values(by="ATOM_INDEX")
+        .reset_index(drop=True)
+    )
+
     if list(df["ATOM_TYPE"].isna()).count(True) > 0:
         print("WARNING: Protein contains unsupported atom types. Only supported atom-type pairs are counted.")
+   
     return df
+
 
 
 def GetMolAEVs_extended(protein_path, mol, atom_keys, radial_coefs, atom_map):
@@ -386,11 +434,63 @@ def mol_to_graph(mol, mol_df, aevs, extra_features=["atom_symbol",
     return len(mol_df), features, edge_index, edge_attr
 
 
+def process_row(args):
+    """
+    Process a single row of the DataFrame to generate a graph for the protein-ligand complex.
+    
+    Parameters
+    ----------
+    args: tuple
+        Contains (index, row, atom_keys, atom_map, radial_coefs) where row is a Series from the DataFrame.
+    
+    Returns
+    -------
+    tuple
+        (system_id, graph, failed, failed_after_reading, log_messages)
+        - system_id: The identifier for the complex.
+        - graph: The computed graph or None if failed.
+        - failed: True if molecule loading failed, else False.
+        - failed_after_reading: True if AEV/graph computation failed, else False.
+    """
+    index, row, atom_keys, atom_map, radial_coefs = args
+    
+    system_id = row["system_id"]
+    protein_path = row["protein_path"]
+    ligand_path = row["ligand_path"]
+    ligand_ftype = ligand_path.split(".")[-1]
+    
+    # Load ligand
+    if ligand_ftype == "mol2":
+        mol = Chem.MolFromMol2File(ligand_path)
+    elif ligand_ftype == "sdf":
+        mol = Chem.SDMolSupplier(ligand_path, removeHs=False)[0]
+    else:
+        print(f"The ligand file type {ligand_ftype} is not supported for system {system_id}. Only mol2 and sdf are supported.")
+        return system_id, None, True, False
+    
+    if mol is None:
+        print(f"Can't read molecule structure: {system_id}")
+        return system_id, None, True, False
+    else:
+        if ligand_ftype == "mol2":
+            mol = Chem.AddHs(mol, addCoords=True)
+    
+    # Compute AEVs and graph
+    try:
+        mol_df, aevs = GetMolAEVs_extended(protein_path, mol, atom_keys, radial_coefs, atom_map)
+        graph = mol_to_graph(mol, mol_df, aevs)
+        return system_id, graph, False, False
+    except ValueError as e:
+        print(f"ValueError in system {system_id}: {str(e)}")
+        traceback.print_exc()
+        return system_id, None, False, True
+
+
 def main():
     t0 = time.time()
     args = initialize(sys.argv[1:])
-    sys.stdout = Logger(args.log)
-    sys.stderr = Logger(args.log)
+    sys.stdout = utils.Logger(args.log)
+    sys.stderr = utils.Logger(args.log)
 
     print(f"Version of aev_plig: {aev_plig.__version__}")
     print(f"Command line: {' '.join(sys.argv)}")
@@ -400,7 +500,7 @@ def main():
     # Step 1. Load data
     data = pd.read_csv(args.csv)
     print(f"Generating graphs for the training set {args.csv} ...")
-    print("The number of data points is ", len(data))
+    print(f"The number of data points: {len(data)}")
 
     # Step 2. Generate for all complexes: ANI-2x with 22 atom types. Only 2-atom interactions
     atom_keys = pd.read_csv(os.path.join(data_dir, "PDB_Atom_Keys.csv"), sep=",")
@@ -419,35 +519,21 @@ def main():
     failed_list = []
     failed_after_reading = []
 
-    for index, row in tqdm(data.iterrows(), file=sys.__stderr__):
-        system_id = row["system_id"]
-        protein_path = row["protein_path"]
-        ligand_path = row["ligand_path"]
-        ligand_ftype = ligand_path.split(".")[-1]
-        if ligand_ftype == "mol2":
-            mol = Chem.MolFromMol2File(ligand_path)
-        elif ligand_ftype == "sdf":
-            mol = Chem.SDMolSupplier(ligand_path, removeHs=False)[0]
-        else:
-            print(f"The ligand file type {ligand_ftype} is not supported. Only mol2 and sdf are supported.")
-            continue
-
-        if mol is None:
-            print("can't read molecule structure:", system_id)
-            failed_list.append(system_id)
-            continue
-        else:
-            if ligand_ftype == "mol2":
-                mol = Chem.AddHs(mol, addCoords=True)
-        
-        try:
-            mol_df, aevs = GetMolAEVs_extended(protein_path, mol, atom_keys, radial_coefs, atom_map)
-            graph = mol_to_graph(mol, mol_df, aevs)
-            mol_graphs[system_id] = graph
-        except ValueError as e:
-            print(e)
-            failed_after_reading.append(system_id)
-            continue
+    torch.set_num_threads(1)  # This is necessary or the parallelization would not help.
+    pool_input = [(index, row, atom_keys, atom_map, radial_coefs) for index, row in data.iterrows()]
+    with Pool(initializer=lambda: os.sched_setaffinity(0, set(range(cpu_count())))) as pool:
+        for system_id, graph, failed, failed_after_reading_flag in tqdm(
+            pool.imap(process_row, pool_input),
+            total=len(data),
+            file=sys.__stderr__,
+            desc="Generating graphs",
+        ):
+            if failed:
+                failed_list.append(system_id)
+            elif failed_after_reading_flag:
+                failed_after_reading.append(system_id)
+            else:
+                mol_graphs[system_id] = graph
 
     print("Number of failed molecules:", len(failed_list))
     print("Number of failed after reading:", len(failed_after_reading))
@@ -456,4 +542,4 @@ def main():
     with open(args.output, 'wb') as handle:
         pickle.dump(mol_graphs, handle, protocol=pickle.HIGHEST_PROTOCOL)
     
-    print(f"Elapsed time: {time.time() - t0:.2f} seconds")
+    print(f"Elapsed time: {utils.format_time(time.time() - t0)}")
