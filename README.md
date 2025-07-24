@@ -1,249 +1,120 @@
 # AEV-PLIG refined
-
-AEV-PLIG is a GNN-based scoring function that predicts the binding affinity of a bound protein-ligand complex given its 3D structure.
-
-This repo provides an implementation of the AEV-PLIG model modified from the original repo ([AEV-PLIG](https://github.com/isakvals/AEV-PLIG)) with a more user-friendly command-line interfaces (CLI) and a more organized codebase. For more details about the notable changes, please refer to [CHANGELOG.md](CHANGELOG.md).
+This is a repository that hosts a refined implementation for the AEV-PLIG model, a GNN-based scoring function that predicts the binding affinity of a bound protein-ligand complex given its 3D structure. Compared to the original repo ([here](https://github.com/isakvals/AEV-PLIG)), this repo provides user-friendly command-line interfaces (CLIs), a more organised codebase, and implements the method as a pip-installable package. For more details about the notable changes, please refer to [CHANGELOG.md](CHANGELOG.md).
 
 ## Installation
 We recommend using a conda environment to install the package.
-```
+```bash
 conda create --name aev-plig
 conda activate aev-plig
 pip install --upgrade pip setuptools
 
 git clone https://github.com/wehs7661/AEV-PLIG-refined.git
 cd AEV-PLIG-refined
+pip install -e .
+```
 
+Note that you might need to install PyTorch and PyTorch Geometric separately, depending on your system configuration. For example, the following commands are for a system with CUDA 12.4 and PyTorch 2.5.0. Please adjust the commands according to your system's CUDA version and PyTorch version.
+
+```bash
 pip install torch==2.5.0
-python3.10 -c "import torch; print(torch.__version__)"
-pip3.10 install torch-scatter --no-cache-dir -f https://data.pyg.org/whl/torch-<TORCH_VERSION>+<CUDA_VERSION>.html
-# for example: pip3.10 install torch-scatter --no-cache-dir -f https://data.pyg.org/whl/torch-2.5.0+cu124.html
-
-pip3.10 install -e .
-
-echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
-source ~/.bashrc
+pip install torch-scatter --no-cache-dir -f https://data.pyg.org/whl/torch-2.5.0+cu124.html
 ```
 
-## Command-line interfaces (CLIs)
-The package provides several command-line interfaces (CLIs) to facilitate the streamlined data processing and model training.
+## Tutorial
+In this tutorial, we will demonstrate how one can use the command-line interfaces (CLIs) provided in this package to conveniently train an ensemble of five AEV-PLIG models on the union set of HiQBind and BindingNet v1, then test the ensemble model on a custom test set. For details about reproducing results from the original paper, please refer to the original repo [here](https://github.com/isakvals/AEV-PLIG).
 
-### CLI `process_dataset`
-Here is the help message for the CLI `process_dataset`:
+### Step 1: Prepare dataset index files using `process_dataset`
+
+Before we generate a protein-ligand interaction graph (PLIG) for each binding complex, we need to generate an index file for each dataset of interest. Such an index file is required for each of the training sets (HiQBind, BindingNet v1, and a custom dataset) and the test set, and must at least contain the following columns:
+- `system_id`: A unique identifier for each binding complex.
+- `pK`: The binding affinity of the complex, which can be in pKd, pKi, or pIC50 format.
+- `protein_path`: The path to the protein structure file (in PDB format).
+- `ligand_path`: The path to the ligand structure file (in SDF format).
+- `split`: The split of the binding complex, which can be `train`, `validation`, or `test`. This is used to indicate whether the complex is part of the training set, validation set, or test set.
+
+For common datasets such as PDBBind, HiQBind, BindingDB, BindingNet v1, and BindingNet v2, such index files can be prepared using the `process_dataset` CLI. If you have a custom training set or test set, you will need to prepare a CSV file on your own and make sure it contains the necessary columns. Note, when using the `process_dataset` CLI, you can also provide a reference CSV file (using the `-cr` flag) to calculate the maximum Tanimoto similarity for each ligand in the processed dataset against the ligands in the reference CSV file, and only consider entries having a maximum similarity below the cutoff specified by the flag `-sc`. This is useful for ensuring that the ligands in your training set are not too similar to the ones in the reference dataset, which is often the test set to avoid data leakage. For more information about the CLI `process_dataset`, please refer to its help message, which can be accessed by running `process_dataset -h` or `process_dataset --help`.
+
+In the following example, we will process the HiQBind and BindingNet v1 datasets using `process_dataset`, and assume that the python script `prepare_dataset.py` does the necessary processing to generate the index file for the custom dataset. Note that we set the similarity cutoff to 0.9 (with `-sc 0.9`), a split of 95% for training and 5% for validation (with `-s 95 5 0`), and a random seed of 0 (with `-rs 0`).
+```bash
+python prepare_dataset.py  # A custom script to prepare an index file for your custom test set, processed_custom_test.csv
+process_dataset -ds hiqbind -d path_to_hiqbind_directory -cr path_to_ref_csv_file -l process_hiqbind.log -sc 0.9 -s 95 5 0 -rs 0 -o processed_hiqbind.csv
+process_dataset -ds bindingnet_v1 -d path_to_bindingnet_v1_directory -cr path_to_ref_csv_file -l process_bindingnet_v1.log -sc 0.9 -s 95 5 0 -rs 0 -o processed_bindingnet_v1.csv
 ```
-usage: process_dataset [-h] -ds
-                       {pdbbind,hiqbind,bindingdb,bindingnet_v1,bindingnet_v2,bindingnet_v1_v2,neuralbind,custom}
-                       -d DIR [DIR ...] [-cr CSV_REF] [-cf CSV_FILTER] [-s SPLIT SPLIT SPLIT]
-                       [-sc SIMILARITY_CUTOFF] [-rs RANDOM_SEED] [-f FILTERS [FILTERS ...]]
-                       [-o OUTPUT] [-l LOG]
+Note that log files are generated for each dataset processing step, which can be useful for debugging or tracking the processing steps. All the other CLIs in this package also generate informative log files.
 
-This CLI processes an input dataset and returns a CSV file for graph generation.
+### Step 2: Generate PLIGs using `generate_graphs`
+After we have the index files ready, we use `generate_graphs` to generate PLIGs for each of the corresponding dataset, with the graphs saved in pickled files including `hiqbind.pickle`, `bindingnet_v1.pickle`, and `custom_test.pickle`. For more information about the CLI `generate_graphs`, please refer to its help message, which can be accessed by running `generate_graphs -h` or `generate_graphs --help`.
 
-options:
-  -h, --help            show this help message and exit
-  -ds {pdbbind,hiqbind,bindingdb,bindingnet_v1,bindingnet_v2,bindingnet_v1_v2,neuralbind,custom},
-  --dataset {pdbbind,hiqbind,bindingdb,bindingnet_v1,bindingnet_v2,bindingnet_v1_v2,neuralbind,custom}
-                        The dataset to process. Options include pdbbind, hiqbind, bindingdb,
-                        bindingnet_v1, bindingnet_v2, neuralbind, and custom (user-defined dataset).
-  -d DIR [DIR ...], --dir DIR [DIR ...]
-                        The root directory containing the dataset. Note that if bindingnet_v1_v2 is
-                        selected as the dataset, (via the flag -ds/--dataset), two directories must
-                        be provided: the first one is for BindingNet v1 and the second one is for
-                        BindingNet v2.
-  -cr CSV_REF, --csv_ref CSV_REF
-                        The reference CSV file containing ligand paths (in the column 'ligand_path')
-                        against which the maximum Tanimoto similarity is calculated for each ligand
-                        in the processed dataset.
-  -cf CSV_FILTER, --csv_filter CSV_FILTER
-                        The CSV file containing the system IDs (in the column 'system_id') to be
-                        filtered out from the processed dataset.
-  -s SPLIT SPLIT SPLIT, --split SPLIT SPLIT SPLIT
-                        The split ratio for train, validation, and test sets. Default is [0.8, 0.1,
-                        0.1].
-  -sc SIMILARITY_CUTOFF, --similarity_cutoff SIMILARITY_CUTOFF
-                        The cutoff value for maximum Tanimoto similarity. Default is 1.0. A value of
-                        x means that only ligands with maximum Tanimoto similarity less than x will
-                        be considered for splitting. This option is only valid when the flag '-s'/'
-                        --split' is specified.
-  -rs RANDOM_SEED, --random_seed RANDOM_SEED
-                        The random seed for splitting the dataset. Default is None, in which case no
-                        random seed is used.
-  -f FILTERS [FILTERS ...], --filters FILTERS [FILTERS ...]
-                        The filters to apply to the dataset before splitting it. The filters are in
-                        the format of 'column_name operator value'. For example,
-                        'max_tanimoto_schrodinger < 0.9' will filter out entries with column
-                        'max_tanimoto_schrodinger' larger than 0.9. The operators include '<', '<=',
-                        '>', '>=', '==', and '!='.
-  -o OUTPUT, --output OUTPUT
-                        The output CSV file. The default is processed_[dataset].csv where [dataset]
-                        is the dataset name.
-  -l LOG, --log LOG     The path to the log file. Default is process_dataset.log.
+```bash
+generate_graphs -c processed_hiqbind.csv -o hiqbind.pickle  -l generate_graphs_hiqbind.log
+generate_graphs -c processed_bindinginet_v1.csv -o bindingnet_v1.pickle -l generate_graphs_bindingnet_v1.log
+generate_graphs -c processed_custom_test.csv -o custom_test.pickle  -l generate_graphs_custom_test.log
 ```
 
+### Step 3: Create PyTorch data using `create_pytorch_data`
+After generating the PLIGs, we need to create PyTorch data files that can be used for training, validating and testing the AEV-PLIG models. This can be done using the `create_pytorch_data` CLI, which takes the pickled PLIGs and the corresponding index files as input, and generates PyTorch data files. For more information about the CLI `create_pytorch_data`, please refer to its help message, which can be accessed by running `create_pytorch_data -h` or `create_pytorch_data --help`.
 
-### CLI `generate_graphs`
-Here is the help message for the CLI `generate_graphs`:
+```bash
+create_pytorch_data -pg hiqbind.pickle bindingnet_v1.pickle custom_test_set.pickle -c processed_hiqbind.csv processed_bindingnet_v1.csv processed_test_set.csv -l create_pytorch_data.log
 ```
-usage: generate_graphs [-h] -c CSV [-o OUTPUT] [-l LOG]
+This command will generate a folder `data` that contains the subfolder `processed`, where the PyTorch files `dataset_test.pt`, `dataset_train.pt`, and `dataset_validation.pt` reside.
 
-This CLI generates graphs for the input dataset.
+### Step 4: Train AEV-PLIG models using `train_aev_plig`
+With the PyTorch data files ready, we can now train the AEV-PLIG models using the following command. In the following example, we train an ensemble of five AEV-PLIG models (with `-nm 5`). Check the help message of the CLI by running `train_aev_plig -h` or `train_aev_plig --help` if you are interested in trying different training parameters. Note that you can specify the GPU for training by setting the `CUDA_VISIBLE_DEVICES` environment variable, as done below.
 
-options:
-  -h, --help            show this help message and exit
-  -c CSV, --csv CSV     The path to the input processed CSV file. The CSV file should at least have
-                        columns including 'system_id', 'protein_path', and 'ligand_path'.
-  -o OUTPUT, --output OUTPUT
-                        The path to the output pickle file for the generated graphs. Default is
-                        graphs.pickle.
-  -l LOG, --log LOG     The path to the log file. Default is generate_graphs.log.
+```bash
+CUDA_VISIBLE_DEVICES=0 train_aev_plig -nm 5 -l train_aev_plig.log
 ```
+All trained models, which are named in the format `<date_and_time>_model_GATv2Net_dataset_*.model`, will be saved in the folder `outputs`. Additionally, a scaler file named `<date_and_time>_model_GATv2Net_dataset.pickle` will also be saved in the same folder.
 
-### CLI `create_pytorch_data`
-Here is the help message for the CLI `create_pytorch_data`:
+### Step 5: Assess the trained models using `assess_aev_plig`
+During the execution of the training command shown above, the performance of each trained model will be printed to the log file. If you would like to reassess the models after training, you can use the `assess_aev_plig` CLI. By default, this CLI assumes PyTorch files to be saved in folder `data/processed` and the trained models to be saved in the folder `outputs`, but you may specify different paths using the flags `-md`, `tr`, and `-t`. For more information about the CLI `assess_aev_plig`, please refer to its help message, which can be accessed by running `assess_aev_plig -h` or `assess_aev_plig --help`.
+
+```bash
+assss_trained_models -md outputs -tr data/processed/dataset_train.pt -v data/processed/dataset_validation.pt -t data/processed/dataset_test.pt -l assess_aev_plig.log -o assess_trained_models.csv
 ```
-usage: create_pytorch_data [-h] -pg PICKLED_GRAPHS [PICKLED_GRAPHS ...] -c CSV_FILES [CSV_FILES ...]
-                           [-p PREFIX] [-o OUTPUT] [-l LOG]
+The command will output a CSV file `assess_trained_models.csv` that contains columns including `model`, `y_true`, `group_id`, `aboslute_error`, and `squared_error`. Performance metrics for each model and the ensemble model, such as RMSE, Pearson correaltion coefficient, Kendall's tau correlation coefficient, Spearman correlation coefficient, and C-index, will be printed to the log file.
 
-This CLI process pickled graphs and create PyTorch data ready for training.
+### Step 6: Putting everything together in a shell script
+To automate the above steps, we can create a shell script that runs all the necessary commands in sequence.
 
-options:
-  -h, --help            show this help message and exit
-  -pg PICKLED_GRAPHS [PICKLED_GRAPHS ...], --pickled_graphs PICKLED_GRAPHS [PICKLED_GRAPHS ...]
-                        The paths to the pickled graphs. The pickled graphs should be in the format
-                        of .pkl or .pickle.
-  -c CSV_FILES [CSV_FILES ...], --csv_files CSV_FILES [CSV_FILES ...]
-                        The paths to the input processed CSV files, each corresponding to a pickled
-                        graph. The order of the CSV files should match the order of the pickled
-                        graphs. The CSV files should contain the columns 'system_id',
-                        'protein_path', 'ligand_path', 'pK', and 'split'. The 'system_id' column
-                        should contain the same IDs as the pickled graphs.
-  -p PREFIX, --prefix PREFIX
-                        The prefix of the output PyTorch files. Default is 'dataset'.
-  -o OUTPUT, --output OUTPUT
-                        The output directory. Default is the same as the input directory.
-  -l LOG, --log LOG     The path to the log file. Default is create_pytorch_data.log.
-```
+````bash
+# Step 1. Prepare the dataset index files
+python prepare_dataset.py  # A custom script you write to prepare your custom dataset index file
+process_dataset -ds hiqbind -d path_to_hiqbind_directory -cr path_to_ref_csv_file -l process_hiqbind.log -sc 0.9 -s 95 5 0 -rs 0
+process_dataset -ds bindingnet_v1 -d path_to_bindingnet_v1_directory -cr path_to_ref_csv_file -l process_bindingnet_v1.log -sc 0.9 -s 95 5 0 -rs 0
 
-### CLI `assess_trained_models`
-Here is the help message for the CLI `assess_trained_models`:
-```
-usage: assess_trained_models [-h] [-md MODEL_DIR] [-tr TRAIN_DATASET] [-t TEST_DATASET]
-                             [-o OUTPUT_CSV] [-l LOG] [-hd HIDDEN_DIM] [-nh N_HEADS] [-a ACT_FN]
-                             [-n N_ITERATIONS] [-nm N_MIN]
+# Step 2. Generate PLIGs
+generate_graphs -c processed_hiqbind.csv -o hiqbind.pickle  -l generate_graphs_hiqbind.log
+generate_graphs -c processed_bindinginet_v1.csv -o bindingnet_v1.pickle -l generate_graphs_bindingnet_v1.log
+generate_graphs -c processed_custom_test.csv -o custom_test.pickle  -l generate_graphs_custom_test.log
 
-Assess trained AEV-PLIG models on benchmark test datasets
+# Step 3. Create PyTorch data files
+create_pytorch_data -pg hiqbind.pickle bindingnet_v1.pickle custom_test_set.pickle -c processed_hiqbind.csv processed_bindingnet_v1.csv processed_test_set.csv -l create_pytorch_data.log
 
-options:
-  -h, --help            show this help message and exit
-  -md MODEL_DIR, --model_dir MODEL_DIR
-                        Directory containing trained model files and the pickled scaler file shared
-                        by the models. The default is 'outputs'.
-  -tr TRAIN_DATASET, --train_dataset TRAIN_DATASET
-                        The path to the PyTorch file of the training set for scaling the test data.
-                        The default is 'data/processed/dataset_train.pt'.
-  -t TEST_DATASET, --test_dataset TEST_DATASET
-                        The path to the PyTorch file of the test set. The default is
-                        'data/processed/dataset_test.pt'.
-  -o OUTPUT_CSV, --output_csv OUTPUT_CSV
-                        The path to the output CSV file where the assessment results will be saved.
-                        The default is assess_trained_models.csv.
-  -l LOG, --log LOG     The path to the log file. The default is assessed_trained_models.log.
-  -hd HIDDEN_DIM, --hidden_dim HIDDEN_DIM
-                        The hidden dimension size. The default is 256.
-  -nh N_HEADS, --n_heads N_HEADS
-                        The number of attention heads. The default is 3.
-  -a ACT_FN, --act_fn ACT_FN
-                        The activation function. The default is leaky_relu.
-  -n N_ITERATIONS, --n_iterations N_ITERATIONS
-                        The number of bootstrap iterations to perform for wPCC uncertainty
-                        calculation. The default is 500.
-  -nm N_MIN, --n_min N_MIN
-                        The minimum number of samples required in a group to calculate weighted
-                        averages of metrics across groups. The default is 10.
+# Step 4. Train AEV-PLIG models
+CUDA_VISIBLE_DEVICES=0 train_aev_plig -nm 5 -l train_aev_plig.log
+
+# Step 5. Assess the trained models
+assss_trained_models -md outputs -tr data/processed/dataset_train.pt -v data/processed/dataset_validation.pt -t data/processed/dataset_test.pt -l assess_aev_plig.log -o assess_trained_models.csv
 ```
 
-## Usage
-To be added.
-
----
-## Reproducing the results from the paper
-In this section, we elaborate necessary steps to reproduce the results from the paper.
-
-### 1. Download training data
-Execute the following commands to download and extract the training datasets PDBbind and BindingNet:
+## References
+If you use AEV-PLIG in your research, please cite the following paper:
 ```
-wget http://pdbbind.org.cn/download/PDBbind_v2020_other_PL.tar.gz
-wget http://pdbbind.org.cn/download/PDBbind_v2020_refined.tar.gz
-wget http://bindingnet.huanglab.org.cn/api/api/download/binding_database
-
-tar -xvf PDBbind_v2020_other_PL.tar.gz
-tar -xvf PDBbind_v2020_refined.tar.gz
-mv binding_database binding_database.tar.gz
-tar -xvf binding_database.tar.gz
+@article{valsson2025narrowing,
+  title={Narrowing the gap between machine learning scoring functions and free energy perturbation using augmented data},
+  author={Valsson, {\'I}sak and Warren, Matthew T and Deane, Charlotte M and Magarkar, Aniket and Morris, Garrett M and Biggin, Philip C},
+  journal={Communications Chemistry},
+  volume={8},
+  number={1},
+  pages={41},
+  year={2025},
+  publisher={Nature Publishing Group UK London}
+}
 ```
 
-### 2. Data processing
-In the folder `AEV_PLIG_project`, we first create folders including `csv_files`, `log_files`, and `graphs` to organize the files generated during this step. 
-```
-mkdir csv_files log_files graphs
-```
-Notably, to make sure we have exactly the same training data as the original paper, we use the datasets `processed_pdbbind.csv` and `processed_bindingnet.csv` in the original repo as reference datasets.
-```
-cp {path_to_processed_pdbbind.csv} csv_files/ref_pdbbind.csv
-cp {path_to_processed_bindingnet.csv} csv_files/ref_bindingnet.csv
-```
-Then, we use the CLI `process_dataset` to generate the preprocessed datasets using the following commands:
-```
-process_dataset -d {path_to_pdbbind} -ds pdbbind -r csv_files/ref_pdbbind.csv -o csv_files/processed_pdbbind.csv  -l log_files/process_pdbbind.log
-process_dataset -d {path_to_bindingnet_database} -ds bindingnet -r csv_files/ref_bindingnet.csv -o csv_files/processed_bindingnet.csv -l log_files/
-process_bindingnet.log
-```
-This will generate a CSV file containing necessary columns for graph generation by the CLI `generate_graphs` (see below), including `system_id`, `protein_path`, and `ligand_path`. This step should take just a few seconds for PDBbind and under two minutes for BindingNet.
-
-### 3. Graph generation
-To generate graphs for PDBbind and BindingNet, we run the following command:
-```
-generate_graphs -c csv_files/processed_pdbbind.csv -o graphs/pdbbind_graphs.pickle -l log_files/generate_graphs_pdbbind.log
-generate_graphs -c csv_files/processed_bindingnet.csv -o graphs/bindingnet_graphs.pickle -l log_files/generate_graphs_bindingnet.log
-```
-The command takes 30 to 60 minutes to complete. For each dataset, the generated graphs are saved in a pickle file.
-
----
-#### Generate data for pytorch
-Running this script takes around 2 minutes.
-```
-python create_pytorch_data.py
-```
-The script outputs the following files in *data/processed/*:
-
-*pdbbind_U_bindingnet_ligsim90_train.pt*, *pdbbind_U_bindingnet_ligsim90_valid.pt*, and *pdbbind_U_bindingnet_ligsim90_test.pt*
-
-#### Run training
-Running the following script takes 25 hours using a NVIDIA GeForce GTX 1080 Ti GPU. Once a model has been trained, the next section describes how to use it for predictions.
-```
-python training.py --activation_function=leaky_relu --batch_size=128 --dataset=pdbbind_U_bindingnet_ligsim90 --epochs=200 --head=3 --hidden_dim=256 --lr=0.00012291937615434127 --model=GATv2Net
-```
-The trained models are saved in *output/trained_models*
-
-
-### Predictions
-In order to make predictions, the model requires a *.csv* file with the following columns:
-- *unique_id*, unique identifier for the datapoint
-- *sdf_file*, relative path to the ligand *.sdf* file
-- *pdb_file*, relative path to the protein *.pdb* file
-
-An example dataset is included in *data/example_dataset.csv* for this demo.
-
-```
-python process_and_predict.py --dataset_csv=data/example_dataset.csv --data_name=example --trained_model_name=20240423-200034_model_GATv2Net_pdbbind_U_bindingnet_ligsim90
-```
-The script processes data in *dataset_csv*, and removes datapoints if:
-1. .sdf file cannot be read by RDkit
-2. Molecule contains rare element
-3. Molecule has undefined bond type
-
-The script then creates graphs and pytorch data to run the AEV-PLIG model specified with *trained_model_name*. The default is AEV-PLIG trained on PDBbind v2020 and BindingNet
-
-The predictions are saved under *output/predictions/data_name_predictions.csv*
-
-For the example dataset, the script takes around 20 seconds to run
+## Authors
+Note that this project is based on [this repo](https://github.com/isakvals/AEV-PLIG). The authors of the changes made upon the original repo include:
+- Wei-Tse Hsu, University of Oxford (wei-tse.hsu@bioch.ox.ac.uk)
+- Savva Grevtsev, University of Oxford (savva.grevtsev@merton.ox.ac.uk)
