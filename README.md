@@ -13,7 +13,15 @@ cd AEV-PLIG-refined
 pip install -e .
 ```
 
-Note that you might need to install PyTorch and PyTorch Geometric separately, depending on your system configuration. For example, the following commands are for a system with CUDA 12.4 and PyTorch 2.5.0. Please adjust the commands according to your system's CUDA version and PyTorch version.
+Note that you might need to install PyTorch and PyTorch Geometric separately, depending on your system configuration.
+
+```bash
+pip install torch==2.5.0
+python3.10 -c "import torch; print(torch.__version__)"
+pip3.10 install torch-scatter --no-cache-dir -f https://data.pyg.org/whl/torch-<TORCH_VERSION>+<CUDA_VERSION>.html
+```
+
+For example, the following commands are for a system with CUDA 12.4 and PyTorch 2.5.0. Please adjust the commands according to your system's CUDA version and PyTorch version.
 
 ```bash
 pip install torch==2.5.0
