@@ -127,7 +127,7 @@ def load_trained_model(model_path: str, scaler_path: str, num_node_features: int
     num_edge_features : int
         Number of edge features in the graph data
     device : str
-        PyTorch device to load the model on. The values should be 'cpu' or 'cuda'.
+        PyTorch device to load the model on. The values should be 'xpu', 'cuda', or 'cpu'.
     config : argparse.Namespace
         Configuration parameters for the GATv2Net model, including hidden_dim, n_heads, and act_fn.
         
@@ -248,7 +248,7 @@ def main():
     print(f"\nFound the scaler file in directory {args.model_dir}: {os.path.basename(scaler_path)}\n")
 
     # Set up arguments for running inference
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('xpu' if torch.xpu.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu')
 
     train_data = nn_utils.GraphDataset(
         root=os.path.dirname(os.path.dirname(args.train_dataset)),

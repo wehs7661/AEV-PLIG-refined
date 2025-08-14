@@ -11,14 +11,17 @@ def get_device():
     Returns
     -------
     device : torch.device
-        The device to be used (CPU or GPU).
+        The device to be used (XPU, GPU, or CPU).
     """
-    if(torch.cuda.is_available()):
-        print("GPU is available")
-        device = torch.device("cuda")
+    if torch.xpu.is_available():
+        device = torch.xpu.current_device()
+        print(f'Using XPU device.')
+    elif torch.cuda.is_available():
+        device = torch.device('cuda')
+        print(f'Using GPU device.')
     else:
-        print("GPU is NOT available")
-        device = torch.device("cpu")
+        device = torch.device('cpu')
+        print('Using CPU device.')
     
     return device
 
@@ -37,6 +40,8 @@ def set_seed(seed):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+    if torch.xpu.is_available():
+        torch.xpu.manual_seed_all(seed)
 
 def init_weights(layer):
     if hasattr(layer, "weight") and "BatchNorm" not in str(layer):

@@ -111,7 +111,7 @@ def predict(model, device, loader, y_scaler=None):
     model : torch.nn.Module
         The model to use for prediction.
     device : torch.device
-        The device to use for prediction, e.g. 'cpu' or 'cuda'.
+        The device to use for prediction, e.g., 'xpu', 'cuda', or 'cpu'.
     loader : torch.utils.data.DataLoader
         The data loader for the dataset.
     y_scaler : sklearn.preprocessing.StandardScaler
@@ -158,7 +158,7 @@ def train_one_epoch(model, device, train_loader, optimizer, loss_fn):
     model : torch.nn.Module
         The PyTorch model to train.
     device : torch.device
-        The device to use for training, e.g. 'cpu' or 'cuda'.
+        The device to use for training, e.g., 'xpu', 'cuda', or 'cpu'.
     train_loader : torch.utils.data.DataLoader
         The data loader for the training dataset.
     optimizer : torch.optim.Optimizer
@@ -196,7 +196,7 @@ def _train(model, device, loss_fn, train_loader, valid_loader, optimizer, n_epoc
     model : torch.nn.Module
         The PyTorch model to train.
     device : torch.device
-        The device to use for training, e.g. 'cpu' or 'cuda'.
+        The device to use for training, e.g., 'xpu', 'cuda', or 'cpu'.
     loss_fn : torch.nn.Module
         The loss function to use for training.
     train_loader : torch.utils.data.DataLoader
